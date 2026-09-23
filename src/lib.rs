@@ -38,8 +38,11 @@ pub fn run() -> u8 {
     let env = auth::EnvSnapshot::capture();
     let args: Vec<OsString> = std::env::args_os().collect();
     let stderr_tty = io::stderr().is_terminal();
-    // `--no-color` нужен до разбора: от него зависит, раскрасит ли clap справку и ошибки.
+    // `--no-color` нужен до разбора: от него зависит, раскрасит ли clap справку и ошибки;
+    // `--json` и `--dry-run` — форма конверта, если разбор не удался.
     let no_color_flag = args.iter().any(|a| a == "--no-color");
+    let json_flag = args.iter().any(|a| a == "--json");
+    let dry_run_flag = args.iter().any(|a| a == "--dry-run");
     let color = term::color_enabled(stderr_tty, no_color_flag, &env.term);
     let mut command = cli::Cli::command();
     if !color {
@@ -50,15 +53,14 @@ pub fn run() -> u8 {
         .and_then(|matches| cli::Cli::from_arg_matches(&matches));
     let cli = match parsed {
         Ok(cli) => cli,
-        Err(err) => return clap_error(err, stderr_tty),
+        Err(err) => return clap_error(err, stderr_tty && !json_flag),
     };
     let name = commands::command_name(&cli.command);
-    let reporter = Rc::new(term::Reporter::new(
-        cli.global.quiet,
-        cli.global.verbose,
-        stderr_tty,
-        color,
-    ));
+    let json = cli.global.json;
+    let reporter = Rc::new(
+        term::Reporter::new(cli.global.quiet, cli.global.verbose, stderr_tty, color)
+            .with_json(json),
+    );
     let ctx = commands::Ctx {
         global: cli.global,
         env,
@@ -66,13 +68,34 @@ pub fn run() -> u8 {
         clock: Rc::new(clock::SystemClock::new()),
     };
     match commands::dispatch(cli.command, &ctx) {
-        Ok(()) => 0,
+        Ok(outcome) => {
+            if json {
+                let line = format!(
+                    "{}\n",
+                    envelope::success(
+                        &name,
+                        &outcome.result,
+                        outcome.dry_run,
+                        &reporter.take_warnings()
+                    )
+                );
+                // Получатель закрыл поток — сообщить некуда, а данные уже отданы.
+                let _ = match outcome.channel {
+                    commands::Channel::Stdout => io::stdout().write_all(line.as_bytes()),
+                    commands::Channel::Stderr => io::stderr().write_all(line.as_bytes()),
+                };
+            }
+            0
+        }
         Err(err) => {
             reporter.clear_progress();
-            let text = if stderr_tty {
+            let text = if stderr_tty && !json {
                 error::render_human(&err, color)
             } else {
-                format!("{}\n", envelope::failure(&err, &name, false, &[]))
+                format!(
+                    "{}\n",
+                    envelope::failure(&err, &name, dry_run_flag, &reporter.take_warnings())
+                )
             };
             let _ = io::stderr().write_all(text.as_bytes());
             err.exit.code()

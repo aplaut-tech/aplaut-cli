@@ -5,7 +5,9 @@ use std::io::{self, BufWriter, IsTerminal, Write};
 use std::path::Path;
 use std::time::Duration;
 
-use super::Ctx;
+use serde::Serialize;
+
+use super::{path_text, Ctx, Outcome};
 use crate::api_error::ErrorContext;
 use crate::auth::{self, StdinSource, TokenFlags, DEFAULT_BASE_URL};
 use crate::cli::{RecordsVerb, ScrollArgs};
@@ -19,13 +21,27 @@ use crate::resources::Resource;
 use crate::spec::{self, ScrollSpec};
 use crate::state::ScrollParams;
 
-pub fn run(resource: &'static Resource, verb: RecordsVerb, ctx: &Ctx) -> Result<(), CliError> {
+pub fn run(resource: &'static Resource, verb: RecordsVerb, ctx: &Ctx) -> Result<Outcome, CliError> {
     match verb {
         RecordsVerb::Scroll(args) => scroll_records(resource, &args, ctx),
     }
 }
 
-fn scroll_records(resource: &Resource, args: &ScrollArgs, ctx: &Ctx) -> Result<(), CliError> {
+/// Итог обхода в `result` (спека agent mode §2).
+#[derive(Serialize)]
+struct ScrollResult<'a> {
+    records_type: &'a str,
+    emitted: u64,
+    emitted_total: u64,
+    pages: u64,
+    duplicates: u64,
+    completed: bool,
+    already_completed: bool,
+    total_count: Option<u64>,
+    state_path: Option<String>,
+}
+
+fn scroll_records(resource: &Resource, args: &ScrollArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
     let spec = spec::scroll_spec(resource.records_type).ok_or_else(|| {
         CliError::general(
             "internal",
@@ -68,7 +84,17 @@ fn scroll_records(resource: &Resource, args: &ScrollArgs, ctx: &Ctx) -> Result<(
         ctx.clock.as_ref(),
     )?;
     summarize(resource.name, &outcome, args.state.as_deref(), ctx);
-    Ok(())
+    Ok(Outcome::stderr(ScrollResult {
+        records_type: resource.records_type,
+        emitted: outcome.emitted,
+        emitted_total: outcome.emitted_total,
+        pages: outcome.pages,
+        duplicates: outcome.duplicates,
+        completed: outcome.completed,
+        already_completed: outcome.already_completed,
+        total_count: outcome.total_count,
+        state_path: args.state.as_deref().map(path_text),
+    }))
 }
 
 pub fn scroll_params(args: &ScrollArgs, spec: &ScrollSpec) -> Result<ScrollParams, CliError> {

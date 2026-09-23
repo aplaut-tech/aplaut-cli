@@ -113,13 +113,9 @@ fn list_is_a_tree_with_descriptions_marks_active_and_never_prints_tokens() {
         "  ci\n    - base_url: https://api.aplaut.io/v4 (по умолчанию)\n    - токен: есть\n\
          * staging — Стенд для тестов\n    - base_url: https://api.staging.example/v4\n    - токен: нет\n"
     );
-    let json = aplaut(
-        home.path(),
-        &["profile", "list", "--format", "json"],
-        &[],
-        "",
-    );
-    let v: serde_json::Value = serde_json::from_str(&json.stdout).unwrap();
+    let json = aplaut(home.path(), &["profile", "list", "--json"], &[], "");
+    let envelope: serde_json::Value = serde_json::from_str(&json.stdout).unwrap();
+    let v = &envelope["result"]["profiles"];
     assert_eq!(v[0]["name"], "ci");
     assert_eq!(
         (
@@ -215,14 +211,10 @@ fn config_written_by_aplaut_keeps_the_reference_header() {
 fn get_shows_one_profile_and_unknown_is_not_found() {
     let home = TempDir::new("profile-get");
     login(home.path(), "ci", "tok");
-    let out = aplaut(
-        home.path(),
-        &["profile", "get", "ci", "--format", "json"],
-        &[],
-        "",
-    );
+    let out = aplaut(home.path(), &["profile", "get", "ci", "--json"], &[], "");
     assert_eq!(out.code, 0, "{}", out.stderr);
-    let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    let envelope: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    let v = &envelope["result"];
     assert_eq!(
         (v["name"].as_str(), v["has_token"].as_bool()),
         (Some("ci"), Some(true))

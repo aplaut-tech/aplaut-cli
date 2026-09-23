@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use super::Ctx;
+use super::{path_text, Ctx, Outcome};
 use crate::auth::{self, DEFAULT_BASE_URL};
 use crate::cli::ProfileVerb;
 use crate::config::{self, ConfigFile, CredentialsFile, Paths, ProfileConfig};
@@ -26,10 +26,10 @@ struct ProfileView {
     active: bool,
 }
 
-pub fn run(verb: ProfileVerb, ctx: &Ctx) -> Result<(), CliError> {
+pub fn run(verb: ProfileVerb, ctx: &Ctx) -> Result<Outcome, CliError> {
     match verb {
-        ProfileVerb::List(args) => list(&args.format, ctx),
-        ProfileVerb::Get { name, format } => get(&name, &format.format, ctx),
+        ProfileVerb::List => list(ctx),
+        ProfileVerb::Get { name } => get(&name, ctx),
         ProfileVerb::Set { name, description } => set(&name, description.as_deref(), ctx),
         ProfileVerb::Delete { name, yes } => delete(&name, yes, ctx),
         ProfileVerb::Edit => edit(ctx),
@@ -292,42 +292,74 @@ fn changes(old: &ConfigFile, new: &ConfigFile) -> Vec<String> {
     out
 }
 
-fn list(format: &str, ctx: &Ctx) -> Result<(), CliError> {
+fn list(ctx: &Ctx) -> Result<Outcome, CliError> {
     let (_, cfg, creds) = load(ctx)?;
     let views = views(&cfg, &creds, &active(ctx)?);
-    if format == "json" {
-        return print_json(&views);
+    if !ctx.json() {
+        if views.is_empty() {
+            ctx.reporter.info(
+                "Профилей нет: aplaut auth login --profile NAME или aplaut profile set NAME --base-url URL",
+            );
+        } else {
+            let text: String = views.iter().map(render).collect();
+            write_stdout(&text)?;
+        }
     }
-    if views.is_empty() {
-        ctx.reporter.info(
-            "Профилей нет: aplaut auth login --profile NAME или aplaut profile set NAME --base-url URL",
-        );
-        return Ok(());
-    }
-    let text: String = views.iter().map(render).collect();
-    io::stdout()
-        .write_all(text.as_bytes())
-        .map_err(crate::output::write_error)
+    Ok(Outcome::stdout(serde_json::json!({ "profiles": views })))
 }
 
-fn get(name: &str, format: &str, ctx: &Ctx) -> Result<(), CliError> {
+fn get(name: &str, ctx: &Ctx) -> Result<Outcome, CliError> {
     let (_, cfg, creds) = load(ctx)?;
     let views = views(&cfg, &creds, &active(ctx)?);
     let Some(view) = views.iter().find(|v| v.name == name) else {
         return Err(not_found(name, &views));
     };
-    if format == "json" {
-        return print_json(view);
+    if !ctx.json() {
+        write_stdout(&render(view))?;
     }
-    let text = render(view);
+    Ok(Outcome::stdout(view))
+}
+
+fn write_stdout(text: &str) -> Result<(), CliError> {
     io::stdout()
         .write_all(text.as_bytes())
         .map_err(crate::output::write_error)
 }
 
+/// Изменение поля профиля в `result` (спека agent mode §2).
+#[derive(Serialize)]
+struct FieldChange {
+    field: &'static str,
+    from: Option<String>,
+    to: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SetResult {
+    profile: String,
+    created: bool,
+    changes: Vec<FieldChange>,
+    config_path: String,
+}
+
+fn field_changes(before: &ProfileConfig, after: &ProfileConfig) -> Vec<FieldChange> {
+    [
+        ("base_url", &before.base_url, &after.base_url),
+        ("description", &before.description, &after.description),
+    ]
+    .into_iter()
+    .filter(|(_, from, to)| from != to)
+    .map(|(field, from, to)| FieldChange {
+        field,
+        from: from.clone(),
+        to: to.clone(),
+    })
+    .collect()
+}
+
 /// Upsert, как `set` во всей грамматике: несуществующий профиль создаётся.
 /// `none` убирает значение (clig: специальное слово вместо пустой строки).
-fn set(name: &str, description: Option<&str>, ctx: &Ctx) -> Result<(), CliError> {
+fn set(name: &str, description: Option<&str>, ctx: &Ctx) -> Result<Outcome, CliError> {
     auth::validate_profile_name(name)?;
     let base_url = ctx.global.base_url.as_deref();
     if base_url.is_none() && description.is_none() {
@@ -348,6 +380,8 @@ fn set(name: &str, description: Option<&str>, ctx: &Ctx) -> Result<(), CliError>
     };
     let paths = Paths::resolve(&ctx.env)?;
     let mut cfg = config::load_config(&paths)?;
+    let created = !cfg.profiles.contains_key(name);
+    let before = cfg.profiles.get(name).cloned().unwrap_or_default();
     let entry = cfg.profiles.entry(name.to_string()).or_default();
     if let Some(url) = base_url {
         entry.base_url = url;
@@ -355,6 +389,7 @@ fn set(name: &str, description: Option<&str>, ctx: &Ctx) -> Result<(), CliError>
     if let Some(text) = description {
         entry.description = text;
     }
+    let changes = field_changes(&before, entry);
     let summary = format!(
         "Профиль «{name}»: base_url — {}, описание — {}",
         entry.base_url.as_deref().unwrap_or("прод по умолчанию"),
@@ -362,7 +397,12 @@ fn set(name: &str, description: Option<&str>, ctx: &Ctx) -> Result<(), CliError>
     );
     config::save_config(&paths, &cfg)?;
     ctx.reporter.info(&summary);
-    Ok(())
+    Ok(Outcome::stdout(SetResult {
+        profile: name.to_string(),
+        created,
+        changes,
+        config_path: path_text(&paths.config),
+    }))
 }
 
 /// Описание — одна строка: оно выводится в `profile list` после имени.
@@ -378,13 +418,28 @@ fn validate_description(text: &str) -> Result<String, CliError> {
     Ok(text.to_string())
 }
 
-fn delete(name: &str, yes: bool, ctx: &Ctx) -> Result<(), CliError> {
+#[derive(Serialize)]
+struct DeleteResult {
+    profile: String,
+    removed_config: bool,
+    removed_token: bool,
+}
+
+fn delete(name: &str, yes: bool, ctx: &Ctx) -> Result<Outcome, CliError> {
     auth::validate_profile_name(name)?;
     let (paths, mut cfg, mut creds) = load(ctx)?;
-    if !cfg.profiles.contains_key(name) && !creds.profiles.contains_key(name) {
+    let in_config = cfg.profiles.contains_key(name);
+    let with_token = creds.profiles.contains_key(name);
+    if !in_config && !with_token {
         return Err(not_found(name, &views(&cfg, &creds, "")));
     }
-    let with_token = creds.profiles.contains_key(name);
+    let result = |removed: bool| {
+        Outcome::stdout(DeleteResult {
+            profile: name.to_string(),
+            removed_config: removed && in_config,
+            removed_token: removed && with_token,
+        })
+    };
     if !yes {
         let question = format!(
             "Удалить профиль «{name}»{}? [y/N] ",
@@ -396,7 +451,7 @@ fn delete(name: &str, yes: bool, ctx: &Ctx) -> Result<(), CliError> {
         );
         if !confirm(ctx, &question)? {
             ctx.reporter.info("Удаление отменено.");
-            return Ok(());
+            return Ok(result(false));
         }
     }
     cfg.profiles.remove(name);
@@ -404,10 +459,10 @@ fn delete(name: &str, yes: bool, ctx: &Ctx) -> Result<(), CliError> {
     config::save_config(&paths, &cfg)?;
     config::save_credentials(&paths, &creds)?;
     ctx.reporter.info(&format!("Профиль «{name}» удалён."));
-    Ok(())
+    Ok(result(true))
 }
 
-fn edit(ctx: &Ctx) -> Result<(), CliError> {
+fn edit(ctx: &Ctx) -> Result<Outcome, CliError> {
     if !ctx.can_prompt() {
         return Err(CliError::usage(
             "terminal_required",
@@ -432,7 +487,8 @@ fn edit(ctx: &Ctx) -> Result<(), CliError> {
             ));
         }
     }
-    Ok(())
+    // Под --json сюда не попасть: can_prompt() ложен (спека agent mode §2).
+    Ok(Outcome::stdout(serde_json::Value::Null))
 }
 
 /// clig: в терминале — вопрос; без терминала, с --no-input и --json — только явный `--yes`.
@@ -527,12 +583,6 @@ fn not_found(name: &str, views: &[ProfileView]) -> CliError {
         format!("профиль «{name}» не найден"),
     )
     .with_hint(hint)
-}
-
-fn print_json<T: Serialize + ?Sized>(value: &T) -> Result<(), CliError> {
-    let mut out = io::stdout().lock();
-    serde_json::to_writer(&mut out, value).map_err(|e| crate::output::write_error(e.into()))?;
-    writeln!(out).map_err(crate::output::write_error)
 }
 
 #[cfg(test)]

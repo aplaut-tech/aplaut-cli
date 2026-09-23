@@ -186,13 +186,11 @@ pub struct ScrollArgs {
 #[derive(Debug, Subcommand)]
 pub enum ProfileVerb {
     /// Показать профили: base URL, есть ли токен, какой активен
-    List(ProfileFormatArgs),
+    List,
     /// Показать один профиль
     Get {
         /// Имя профиля
         name: String,
-        #[command(flatten)]
-        format: ProfileFormatArgs,
     },
     /// Создать или изменить профиль: `--base-url URL|none`, `--description TEXT|none`
     Set {
@@ -212,13 +210,6 @@ pub enum ProfileVerb {
     },
     /// Открыть файл профилей (config.toml) в $VISUAL / $EDITOR
     Edit,
-}
-
-#[derive(Debug, Clone, Args)]
-pub struct ProfileFormatArgs {
-    /// Формат вывода
-    #[arg(long, value_name = "FORMAT", default_value = "text", value_parser = ["text", "json"])]
-    pub format: String,
 }
 
 #[derive(Debug, Subcommand)]

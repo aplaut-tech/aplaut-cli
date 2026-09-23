@@ -5,7 +5,10 @@ pub mod profile;
 pub mod records;
 
 use std::io::{self, IsTerminal};
+use std::path::Path;
 use std::rc::Rc;
+
+use serde::Serialize;
 
 use crate::auth::EnvSnapshot;
 use crate::cli::{AuthVerb, Command, GlobalArgs, ProfileVerb, RecordsVerb};
@@ -19,6 +22,51 @@ pub struct Ctx {
     pub env: EnvSnapshot,
     pub reporter: Rc<Reporter>,
     pub clock: Rc<dyn Clock>,
+}
+
+/// Куда писать конверт `--json`: у scroll stdout занят данными.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Channel {
+    Stdout,
+    Stderr,
+}
+
+/// Итог команды для `--json` (спека agent mode §2). В текстовом режиме команды печатают сами.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Outcome {
+    pub result: serde_json::Value,
+    pub channel: Channel,
+    pub dry_run: bool,
+}
+
+impl Outcome {
+    pub fn stdout(result: impl Serialize) -> Self {
+        Self::new(result, Channel::Stdout)
+    }
+
+    pub fn stderr(result: impl Serialize) -> Self {
+        Self::new(result, Channel::Stderr)
+    }
+
+    pub fn with_dry_run(self, dry_run: bool) -> Self {
+        Outcome { dry_run, ..self }
+    }
+
+    fn new(result: impl Serialize, channel: Channel) -> Self {
+        Outcome {
+            result: serde_json::to_value(result).expect("итог сериализуется"),
+            channel,
+            dry_run: false,
+        }
+    }
+}
+
+/// Пути в `result` — абсолютные: агент мог запустить команду из другого каталога.
+pub fn path_text(path: &Path) -> String {
+    std::path::absolute(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .display()
+        .to_string()
 }
 
 impl Ctx {
@@ -42,7 +90,7 @@ pub fn can_prompt(stdin_tty: bool, no_input: bool, json: bool) -> bool {
     stdin_tty && !no_input && !json
 }
 
-pub fn dispatch(command: Command, ctx: &Ctx) -> Result<(), CliError> {
+pub fn dispatch(command: Command, ctx: &Ctx) -> Result<Outcome, CliError> {
     match command {
         Command::Reviews { verb } => records::run(&resources::REVIEWS, verb, ctx),
         Command::Products { verb } => records::run(&resources::PRODUCTS, verb, ctx),
@@ -68,7 +116,7 @@ pub fn command_name(command: &Command) -> String {
         Command::Profile { verb } => (
             "profile",
             match verb {
-                ProfileVerb::List(_) => "list",
+                ProfileVerb::List => "list",
                 ProfileVerb::Get { .. } => "get",
                 ProfileVerb::Set { .. } => "set",
                 ProfileVerb::Delete { .. } => "delete",
