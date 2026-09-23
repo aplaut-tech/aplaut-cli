@@ -45,10 +45,26 @@ const SCROLL_AFTER_LONG_HELP: &str = "\
   # Выгрузка с продолжением после сбоя (cron): повторный запуск той же команды продолжит с места остановки.
   aplaut reviews scroll --filter updated_at:gte:2024-01-01T00:00:00Z --state reviews.state.json --format jsonl >> reviews.jsonl
 
+  # Для агента: данные — в файл, итог — одной строкой JSON в stderr.
+  aplaut reviews scroll --filter updated_at:gte:2024-01-01T00:00:00Z --state reviews.state.json --format jsonl --json >> reviews.jsonl
+
 Без --filter сервер отдаёт только записи, изменённые за последние 30 дней.
 
 Доставка — «хотя бы один раз»: после сбоя последняя страница может прийти повторно,
 убирайте дубли по id (например, ReplacingMergeTree).
+
+JSON (--json): данные — в stdout в --format; итог — в stderr одной строкой:
+  {\"ok\":true,\"command\":\"reviews.scroll\",\"cli_version\":…,\"dry_run\":false,
+   \"result\":{\"records_type\",\"emitted\",\"emitted_total\",\"pages\",\"duplicates\",\"completed\",
+   \"already_completed\",\"total_count\",\"state_path\"},\"warnings\":[{\"code\",\"message\"}]}
+  Предупреждения: default_filter, base_url_env_ignored, fields_without_id, field_absent,
+  csv_to_many, csv_new_columns.
+
+Ошибки: invalid_filter, invalid_include, invalid_sort, invalid_per_page, invalid_max_records,
+invalid_fields, duplicate_field, field_needs_include, fields_need_tabular_format, unknown_field,
+field_to_many, state_mismatch, state_invalid, state_version, scroll_position_uncertain,
+scroll_interrupted, no_progress, output_closed, no_token, invalid_token, unauthorized, forbidden,
+rate_limited (retry_after — сколько секунд ждать), server_error, network_error.
 
 Коды выхода: 0 — успех; 2 — ошибка в параметрах; 3 — нет токена или он отклонён;
 7 — исчерпаны повторы после rate limit; 1 — прочие ошибки;
@@ -56,12 +72,157 @@ const SCROLL_AFTER_LONG_HELP: &str = "\
 и запустите ту же команду снова — она продолжит после последней выданной страницы;
 без --state выгрузите заново (повторы в обоих случаях убирайте по id).";
 
+const ROOT_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut auth login
+  aplaut reviews scroll --filter updated_at:gte:2024-01-01T00:00:00Z --format jsonl > reviews.jsonl
+  aplaut products scroll --format csv --max-records 500 | tw
+
+Для агентов и скриптов:
+  --json      итог и ошибка — одной строкой JSON:
+                {\"ok\":true,\"command\":…,\"cli_version\":…,\"dry_run\":false,\"result\":…,\"warnings\":[…]}
+                {\"ok\":false,…,\"error\":{\"code\",\"message\",\"field\",\"retryable\",\"retry_after\",
+                 \"hint\",\"request_id\"},\"warnings\":[…]}
+              итог — в stdout (у scroll — в stderr: stdout занят данными), ошибка — в stderr;
+              предупреждения — в warnings с кодами, а не текстом; включает --no-input
+  --no-input  ничего не спрашивать: вместо вопроса — ошибка с подсказкой, какой флаг передать
+  --yes       подтвердить удаление без вопроса (profile delete)
+  --dry-run   у команд с изменениями: всё проверить и вернуть план в result, ничего не меняя
+  retry_after в ошибке — сколько секунд ждать по словам сервера (429, 503).
+  Без терминала ошибка приходит JSON-конвертом и без --json.
+  Поля result — в разделе «JSON (--json)» справки команды: aplaut <команда> --help.
+  Каталог кодов ошибок и предупреждений — README, раздел «Для агентов и скриптов».
+
+Коды выхода: 0 — успех; 1 — прочие ошибки; 2 — ошибка в параметрах; 3 — нет токена или он
+отклонён; 4 — выгрузка прервана, в stdout только целые записи; 5 — не найдено;
+7 — rate limit, повторы исчерпаны; 8 — нужно подтверждение (--yes).
+
+Документация: https://aplaut.com/docs/api-references/platform/
+Поддержка: support@aplaut.com";
+
+/// Короткая справка (`-h`) листовых команд отсылает к длинной.
+const LEAF_AFTER_HELP: &str = "Примеры, поля JSON (--json) и коды выхода: --help";
+
+const AUTH_LOGIN_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut auth login                                     # ввод скрыт
+  aplaut auth login --profile staging --base-url https://api.staging.example/v4
+  printf '%s' \"$TOKEN\" | aplaut auth login --token-stdin --profile ci --json
+  aplaut auth login --token-file token.txt --profile ci --dry-run --json
+
+Токен сохраняется в ~/.config/aplaut/credentials (0600) и на сервере не проверяется.
+Без терминала, с --no-input и с --json — только --token-stdin или --token-file.
+
+JSON (--json):
+  {\"ok\":true,\"command\":\"auth.login\",\"dry_run\":false,\"result\":{\"profile\":\"ci\",\"token\":\"***\",
+   \"token_source\":\"prompt|stdin|file\",\"replaced\":false,\"credentials_path\":\"…\"},\"warnings\":[]}
+  Сам токен не выводится никогда. С --dry-run — тот же result и \"dry_run\":true, файлы не меняются.
+
+Ошибки: token_required (передайте --token-stdin или --token-file), empty_token,
+invalid_token_format, stdin_is_terminal, token_file_unreadable, invalid_profile,
+invalid_base_url, insecure_base_url, credentials_invalid, config_invalid, io_error.
+
+Коды выхода: 0 — сохранено (с --dry-run — план); 2 — ошибка в параметрах;
+3 — не прочитать файл токена; 1 — прочие ошибки.";
+
+const AUTH_LOGOUT_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut auth logout --profile ci
+  aplaut auth logout --profile ci --dry-run --json
+
+JSON (--json):
+  {\"ok\":true,\"command\":\"auth.logout\",\"dry_run\":false,\"result\":{\"profile\":\"ci\",\"removed\":true},
+   \"warnings\":[]}
+  removed: false — токена в профиле не было (это не ошибка).
+
+Ошибки: invalid_profile, credentials_invalid, io_error.
+
+Коды выхода: 0 — готово (с --dry-run — план); 2 — ошибка в параметрах; 1 — прочие ошибки.";
+
+const PROFILE_LIST_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut profile list
+  aplaut profile list --json
+
+JSON (--json):
+  {\"ok\":true,\"command\":\"profile.list\",\"dry_run\":false,\"result\":{\"profiles\":[{\"name\",
+   \"description\",\"base_url\",\"base_url_default\",\"has_token\",\"active\"}]},\"warnings\":[]}
+  Токены не выводятся: has_token говорит только, есть ли он.
+
+Ошибки: config_invalid, credentials_invalid.
+
+Коды выхода: 0 — успех; 1 — файлы профилей не читаются.";
+
+const PROFILE_GET_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut profile get staging
+  aplaut profile get staging --json
+
+JSON (--json):
+  {\"ok\":true,\"command\":\"profile.get\",\"dry_run\":false,\"result\":{\"name\",\"description\",
+   \"base_url\",\"base_url_default\",\"has_token\",\"active\"},\"warnings\":[]}
+
+Ошибки: profile_not_found (в hint — существующие профили), config_invalid, credentials_invalid.
+
+Коды выхода: 0 — успех; 5 — профиля нет; 1 — прочие ошибки.";
+
+const PROFILE_SET_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut profile set staging --base-url https://api.staging.example/v4 --description \"Стенд для тестов\"
+  aplaut profile set staging --base-url none               # вернуть прод по умолчанию
+  aplaut profile set staging --description none --dry-run --json
+
+JSON (--json):
+  {\"ok\":true,\"command\":\"profile.set\",\"dry_run\":false,\"result\":{\"profile\":\"staging\",
+   \"created\":true,\"changes\":[{\"field\":\"base_url\",\"from\":null,\"to\":\"https://…\"}],
+   \"config_path\":\"…\"},\"warnings\":[]}
+  С --dry-run — тот же result и \"dry_run\":true, файл не меняется.
+
+Ошибки: nothing_to_set, invalid_profile, invalid_base_url, insecure_base_url,
+invalid_description, config_invalid, io_error.
+
+Коды выхода: 0 — сохранено (с --dry-run — план); 2 — ошибка в параметрах; 1 — прочие ошибки.";
+
+const PROFILE_DELETE_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut profile delete staging                  # в терминале спросит подтверждение
+  aplaut profile delete staging --yes --json
+  aplaut profile delete staging --dry-run --json
+
+JSON (--json):
+  {\"ok\":true,\"command\":\"profile.delete\",\"dry_run\":false,\"result\":{\"profile\":\"staging\",
+   \"removed_config\":true,\"removed_token\":false},\"warnings\":[]}
+  С --dry-run — что было бы удалено; подтверждение не нужно.
+
+Ошибки: confirmation_required (без терминала, с --no-input и --json нужен --yes),
+profile_not_found, invalid_profile, config_invalid, credentials_invalid, io_error.
+
+Коды выхода: 0 — удалено (с --dry-run — план); 2 — ошибка в параметрах; 5 — профиля нет;
+8 — нужен --yes; 1 — прочие ошибки.";
+
+const PROFILE_EDIT_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut profile edit
+  EDITOR=\"code --wait\" aplaut profile edit
+
+Правится копия config.toml: оригинал заменяется только после проверки. VS Code, Zed,
+Sublime Text, gvim и Kate получают флаг ожидания сами.
+
+JSON (--json): не поддерживается — редактору нужен человек. С --json, --no-input и без
+терминала команда отказывает (terminal_required); агентам и скриптам — aplaut profile set.
+
+Ошибки: terminal_required, editor_failed, editor_returned_immediately, config_invalid,
+config_changed_during_edit, io_error.
+
+Коды выхода: 0 — сохранено или без изменений; 2 — нет терминала; 1 — прочие ошибки.";
+
 #[derive(Debug, Parser)]
 #[command(
     name = "aplaut",
     version = VERSION,
     about = "Консольный клиент Aplaut Platform API",
     after_help = ROOT_AFTER_HELP,
+    after_long_help = ROOT_AFTER_LONG_HELP,
     arg_required_else_help = true,
     disable_version_flag = true
 )]
@@ -186,13 +347,16 @@ pub struct ScrollArgs {
 #[derive(Debug, Subcommand)]
 pub enum ProfileVerb {
     /// Показать профили: base URL, есть ли токен, какой активен
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = PROFILE_LIST_AFTER_LONG_HELP)]
     List,
     /// Показать один профиль
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = PROFILE_GET_AFTER_LONG_HELP)]
     Get {
         /// Имя профиля
         name: String,
     },
     /// Создать или изменить профиль: `--base-url URL|none`, `--description TEXT|none`
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = PROFILE_SET_AFTER_LONG_HELP)]
     Set {
         /// Имя профиля
         name: String,
@@ -203,6 +367,7 @@ pub enum ProfileVerb {
         dry: DryRun,
     },
     /// Удалить профиль вместе с его токеном
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = PROFILE_DELETE_AFTER_LONG_HELP)]
     Delete {
         /// Имя профиля
         name: String,
@@ -213,14 +378,17 @@ pub enum ProfileVerb {
         dry: DryRun,
     },
     /// Открыть файл профилей (config.toml) в $VISUAL / $EDITOR
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = PROFILE_EDIT_AFTER_LONG_HELP)]
     Edit,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum AuthVerb {
     /// Сохранить токен в профиль (ввод скрыт; в скриптах — --token-stdin или --token-file)
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = AUTH_LOGIN_AFTER_LONG_HELP)]
     Login(DryRun),
     /// Удалить токен профиля
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = AUTH_LOGOUT_AFTER_LONG_HELP)]
     Logout(DryRun),
 }
 
