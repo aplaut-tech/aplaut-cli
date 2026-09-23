@@ -12,7 +12,7 @@ installers = ["shell"]
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = ["x86_64-unknown-linux-musl"]
 # Path that installers should place binaries in
-install-path = "CARGO_HOME"
+install-path = "~/.local/bin"
 # Where to host releases
 hosting = "github"
 # Whether to install an updater program
@@ -21,3 +21,5 @@ install-updater = false
 github-attestations = true
 # Which actions to run on pull requests
 pr-run-mode = "plan"
+# The message to display on success
+install-success-msg = "aplaut установлен. Дальше: aplaut auth login"
