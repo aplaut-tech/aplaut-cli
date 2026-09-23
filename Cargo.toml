@@ -1,0 +1,28 @@
+[package]
+name = "aplaut-cli"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.98"
+description = "Command-line client for the Aplaut Platform API"
+repository = "https://github.com/aplaut-tech/aplaut-cli"
+homepage = "https://aplaut.com/docs/api-references/platform/"
+publish = false
+
+[lib]
+name = "aplaut_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "aplaut"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6", features = ["derive"] }
+rpassword = "7.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1.1"
+ureq = "3.4"
+
+[build-dependencies]
+yaml-rust2 = "0.13"

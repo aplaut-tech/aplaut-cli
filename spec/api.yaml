@@ -1,0 +1,3367 @@
+openapi: 3.1.0
+info:
+  version: 4.1.0
+  title: Aplaut Platform API
+  contact:
+    name: Alexander Chaychuk
+    email: alex@aplaut.com
+    url: https://aplaut.com
+  x-logo:
+    url: /assets/brand/aplaut-logo.png
+    altText: Aplaut Logo
+servers:
+  - url: https://api.aplaut.io/v4
+tags:
+  - name: Введение
+    description: |
+      Документ содержит описание __Platform API__, которое используется для управления объектами платформы. Если вы столкнулись с какой-то проблемой,
+      напишите нам <mailto:support@aplaut.com>.
+
+      ### Кодировка
+
+      Данные принимаются и передаются в кодировке __UTF-8__.
+
+      ### Безопасность
+
+      Доступ осуществляется через защищенное соединение по протоколу __HTTPS__.
+
+      ### Дата и время
+
+      Дата и время принимаются и передаются в формате [ISO RFC3339](https://xml2rfc.tools.ietf.org/public/rfc/html/rfc3339.html#anchor14): &nbsp;
+      <span style="white-space: nowrap;">`YYYY-MM-DDTHH:MM:SS+HHMM`</span>.
+
+      ### Формат данных
+
+      Данные принимаются и возвращаются в формате __JSON API__. Рекомендуем ознакомиться со [спецификацией](http://jsonapi.org/).
+
+      В запросах необходимо явно указывать заголовки: `Accept` и `Content-Type`
+      со значением
+      <span style="white-space: nowrap;">`application/vnd.api+json`</span>
+
+      ### Библиотеки
+
+      Для работы с API рекомендуем использовать [готовые библиотеки](http://jsonapi.org/implementations/).
+  - name: Базовый URL
+    description: |
+      Базовый URL API: https://api.aplaut.io/v4.
+  - name: Правила использования
+    description: |
+      Platform API используется для автоматизации процессов и обмена данными между нашей платформой и вашими сервисами.
+
+      Данное API __не предназначено__ для использования на клиентских устройствах, таких как мобильные приложения или браузеры.
+      Оно также не предназначено для работы через шлюзы: мобильный клиент -> шлюз (микросервис) -> Platform API.
+
+      Причин для таких ограничений несколько:
+
+      1. Не безопасно, т.к. ключ API можно очень легко скомпрометировать
+      2. Ответы совсем не кэшируются
+      3. Лимиты на кол-во запросов
+
+      Если вам необходимо получать контент (отзывы, вопросы/ответы, …) на клиентских устройствах,
+      используйте [Widgets API](/docs/api-references/widgets/) (форматы ответа HTML и JSON).
+
+      Если контент необходимо отправлять c клиентских устройств
+      (новые отзыв, вопросы, лайки), используйте [Submissions API](/docs/api-references/submissions/).
+
+      Мы не гарантируем работоспособность API, если правила использования будут нарушены.
+  - name: Фильтрация
+    description: |
+      В некоторых GET запросах (например: товары, отзывы) можно задать
+      специальный параметры фильтрации. Для этого используются query параметр `filter`.
+
+      Значение параметра `filter` состоит из блоков, разделенных знаком `,` (запятая).
+      Каждый блок задает параметр фильтрации в следующем формате:
+      <span style="white-space: nowrap;">`{параметр}:{оператор}:{значение}`</span>
+
+      Возможные операторы:
+
+      | Оператор |                       Описание                       |   Допустимые типы   |                    Пример                     |
+      | :------- | :--------------------------------------------------- | :------------------ | :-------------------------------------------- |
+      | `gt`     | больше чем (>)                                       | *Numeric, DateTime* | `filter=rating:gt:3`                          |
+      | `gte`    | больше чем или равно (>=)                            | *Numeric, DateTime* | `filter=rating:gte:3`                         |
+      | `lt`     | меньше чем (<)                                       | *Numeric, DateTime* | `filter=rating:lt:3`                          |
+      | `lte`    | меньше чем или равно (<=)                            | *Numeric, DateTime* | `filter=rating:lte:3`                         |
+      | `eq`     | равно (==)                                           | *Все типы*          | `filter=rating:eq:3`                          |
+      | `neq`    | не равно (!=)                                        | *Все типы*          | `filter=rating:neq:3`                         |
+      | `in`     | в списке значений; разделитель — <code>&#124;</code> | *Все типы*          | <code>filter=rating:in:3&#124;4&#124;5</code> |
+      | `exists` | наличие (да/нет)                                     | *Все типы*          | `filter=pros:exists:true`                     |
+
+      Пример фильтра c двумя параметрами:
+
+      ```
+      filter=rating:gt:3,product:eq:475
+      ```
+  - name: Сортировка
+    description: |
+      В некоторых GET запросах (например товары, отзывы) можно задать
+      специальный параметры сортировки  результатов.
+      Для этого используются query параметр `sort`.
+
+      Значение параметра `sort` состоит из блоков, разделенных знаком `,` (запятая).
+      Каждый блок задает параметр сортировки в следующем формате:
+      <span style="white-space: nowrap;">`{параметр}:{направление сортировки}`</span>
+      Направление сортировки: `asc` (&uarr;) или `desc` (&darr;).
+
+      Пример сортировки отзывов по убыванию рейтинга и возрастанию даты создания:
+
+      ```
+      sort=rating:desc,created_at:asc
+      ```
+  - name: Пагинация
+    description: |
+      У каждого ресурса есть ограничение на максимальное кол-во объектов,
+      которые можно получить за один запрос - параметр `per_page`.
+
+      Для пагинации используется параметр - `page`,
+      максимальное значение которого, определяется каждым ресурсом в отдельности.
+
+      Чтобы обойти данные ограничения, используйте примерные алгоритмы, описанные ниже.
+
+      #### Кейс 1: Получение только новых объектов.
+      1) Сделайте запрос, в запросе укажите `sort=created_at:asc`
+      2) Запомните `id` у самого последнего объекта в результате
+      3) Добавьте в фильтр условие `filter=id:gt:{ID}`
+      4) Сделайте запрос
+      5) К шагу __2__
+
+      #### Кейс 2: Получение обновлений объектов от начала TIME.
+      1) Сделайте запрос, в запросе укажите `sort=updated_at:asc` и `updated_at:gte:{TIME}`
+      2) Запомните значение атрибута `updated_at` у самого последнего объекта в результате
+      3) Обновите фильтр  `filter=updated_at:gte:{TIME ON STEP 2}`
+      4) Сделайте запрос
+      5) К шагу __2__
+
+      #### Кейс 3: Выгрузка всех объектов целиком.
+
+      Используйте __обход данных__: `GET /scroll/{records_type}`, раздел
+      __Обход данных__ ниже. Он снимает ограничение на номер страницы, и
+      подбирать фильтр самостоятельно не нужно.
+
+  - name: Аутентификация
+    description: |
+      Во всех запросах передается токен OAuth приложения через HTTP заголовок авторизации <br>
+      `Authorization` в формате `Bearer {TOKEN}`.
+
+      Токен OAuth приложения используется для идентификации вашего аккаунта в Aplaut, 
+      а также для получения доступа к конкретному API (scope).
+
+      Пример:
+
+      ```
+      Authorization: Bearer {TOKEN}
+      ```
+
+      Токен можно получить в ЛК в разделе [Разработчикам](https://app.aplaut.io/b/developers) 
+
+      Создайте OAuth приложение, укажите необходимые scope (Platform API) и сгенерируйте токен.
+
+      Обратите внимание максимальное время жизни токена - 2 года. По истечении этого срока нужно будет
+      сгенерировать новый токен.
+  - name: Лимиты
+    description: |
+      Допускается __2 запроса в секунду__ с одного IP. Если скорость поступления запросов
+      превышает данный лимит, то их обработка задерживается так,
+      чтобы запросы обрабатывались с заданной скоростью.
+
+      Для некоторых типов запросов есть дополнительные лимиты, которые устанавливаются __на ключ API__.
+      При превышении данных лимитов вы получите код ответа `429 (Too many requests)` со следующими заголовками:
+      ```
+      X-RateLimit-Limit: 1
+      X-RateLimit-Period: 60
+      X-RateLimit-Reset: 2020-01-01T12:00:00+00:00
+      ```
+
+      Комментарии к заголовкам:
+      * 1 запрос в минуту
+      * Следующий запрос в 2020-01-01T12:00:00+00:00
+
+      Это означает, что вы должны приостановить делать запросы и
+      дождаться указанного времени, когда запросы снова будут разрешены.
+  - name: Заказы
+    description: Все про заказы и транзакции
+  - name: Продукты
+    description: Все про продукты, категории и бренды
+  - name: Отзывы
+    description: Все про отзывы и комментарии
+  - name: Вопросы
+    description: Все про вопросы и ответы
+  - name: Клиенты
+    description: Все про клиентов
+  - name: Задачи на экспорт
+    description: Экспорт данных через файлы
+  - name: Пользователи
+    description: Пользователи ЛК (админы, модераторы, и т.д.)
+  - name: Опросы
+    description: Все про опросы
+  - name: Результаты опросов
+    description: Все про результаты опросов
+  - name: Обход данных
+    description: |
+      Обход (scroll) — способ выгрузить весь набор объектов целиком, без
+      ограничения на номер страницы. Вместо номера страницы клиент передаёт
+      курсор — метку места, на котором он остановился.
+
+      Обход доступен для трёх типов объектов: `reviews`, `products`, `questions`.
+      Тело страницы совпадает с телом соответствующего списка: те же атрибуты,
+      те же связи, тот же формат JSON API.
+
+      #### Алгоритм
+
+      1) Откройте обход: `GET /scroll/{records_type}` с фильтром, сортировкой и `per_page`
+      2) Прочитайте объекты из `data`, а из `meta.cursor` — курсор
+      3) Запросите следующую страницу: `GET /scroll/{records_type}?cursor={CURSOR}`;
+         готовый адрес лежит в `links.next`
+      4) Повторяйте шаги __2__ и __3__, пока `meta.has_more` не станет `false`
+
+      На последней странице `meta.cursor` и `links.next` отсутствуют — это и есть
+      признак конца обхода. Общее число объектов приходит один раз, на первой
+      странице, в `meta.total_count`.
+
+      #### Параметры
+
+      Фильтр, сортировка, `per_page` и `include` задаются __только при открытии__
+      обхода и запоминаются в курсоре. При продолжении достаточно передать один
+      `cursor`; если параметры всё же переданы, они обязаны совпасть с
+      зафиксированными, иначе запрос вернёт `400`. Курсор привязан к вашей
+      компании и к типу объектов: чужой или изменённый курсор не работает.
+
+      #### Фильтр по умолчанию
+
+      Если `filter` не передан, обход ограничивается объектами, изменёнными за
+      последние __30 дней__; применённое выражение приходит в
+      `meta.applied_filter` на первой странице. Любой собственный `filter`
+      отменяет это ограничение целиком — в том числе такой, который `updated_at`
+      не упоминает. Чтобы пройти данные за весь период, задайте границу явно,
+      например `filter=updated_at:gte:2020-01-01T00:00:00Z`.
+
+      #### Записи могут повторяться
+
+      Если пауза между страницами превысила __2 минуты__, обход продолжится от
+      последней отданной записи включительно, и несколько записей придут
+      повторно. __Рассчитывайте на дубли и отсеивайте их по `id`.__
+
+      #### Лимиты
+
+      Сверх общих лимитов на обход действуют два ограничения __на ключ API__:
+
+      | Ограничение                            | Значение             |
+      | :------------------------------------- | :------------------- |
+      | Темп запросов к обходу                 | 1 запрос в 2 секунды |
+      | Открытие обходов (запрос без `cursor`) | 5 в минуту           |
+
+      Не открывайте обход заново на каждую страницу — идите по курсору. Один
+      ключ API не стоит использовать для нескольких параллельных обходов одного
+      типа объектов: это увеличит число дублей.
+
+      Ответ `503` с заголовком `Retry-After` означает временную перегрузку:
+      повторите запрос через указанное число секунд, курсор остаётся
+      действительным.
+paths:
+  /reviews:
+    post:
+      tags:
+        - Отзывы
+      summary: Создание отзыва
+      description: |
+        Если атрибут `product_id` не указан, то отзыв создается о компании, иначе отзыв о товаре.
+
+        Если в списке `photos` будут невалидные URL (не-200 ответ, неподходящий формат файла), то запрос вернёт 422.
+        Чтобы игнорировать невалидные фотографии, передайте мета-параметр `ignore_invalid_photos` со значением `true`.
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  $ref: '#/components/schemas/Review'
+      responses:
+        '201':
+          $ref: '#/components/responses/ReviewCreatedResponse'
+        '422':
+          $ref: '#/components/responses/ValidationErrorResponse'
+    get:
+      tags:
+        - Отзывы
+      summary: Список отзывов
+      deprecated: true
+      description: |
+        Получение списка отзывов согласно заданному фильтру.
+
+        Вместо этого эндпоинта: для регулярной выгрузки — __Задачи на экспорт__
+        (см. дальше), для прохода всего набора целиком — __Обход данных__,
+        `GET /scroll/reviews`.
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/includeInReview'
+        - $ref: '#/components/parameters/filterInReview'
+        - $ref: '#/components/parameters/sortCollection'
+        - required: false
+          in: query
+          name: page
+          description: Номер страницы
+          schema:
+            type: integer
+            maximum: 500
+        - required: false
+          in: query
+          name: per_page
+          description: Кол-во результатов на страницу
+          schema:
+            type: integer
+            minimum: 5
+            maximum: 25
+      responses:
+        '200':
+          $ref: '#/components/responses/ReviewCollectionResponse'
+  /reviews/{id}:
+    get:
+      tags:
+        - Отзывы
+      summary: Поиск отзыва по ID
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/includeInReview'
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '200':
+          $ref: '#/components/responses/ReviewResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundErrorResponse'
+    put:
+      tags:
+        - Отзывы
+      summary: Обновление отзыва по ID
+      description: |
+        Если отзыв с указанным ID не найден, то создается новый отзыв с `external_id` равным ID.
+
+        Обновление объекта `custom_attributes`:
+
+          * новые параметры добавляются
+          * существующие обновляются
+
+        Если в списке `photos` будут невалидные URL (не-200 ответ, неподходящий формат файла), то запрос вернёт 422.
+        Чтобы игнорировать невалидные фотографии, передайте мета-параметр `ignore_invalid_photos` со значением `true`.
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/resourceId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  $ref: '#/components/schemas/Review'
+      responses:
+        '200':
+          $ref: '#/components/responses/ReviewUpdatedResponse'
+        '201':
+          $ref: '#/components/responses/ReviewCreatedResponse'
+    delete:
+      tags:
+        - Отзывы
+      summary: Удаление отзыва по ID
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '204':
+          description: Успешное удаление отзыва
+        '404':
+          $ref: '#/components/responses/NotFoundErrorResponse'
+  /reviews/{id}/relationships/comments:
+    get:
+      tags:
+        - Отзывы
+      summary: Все комментарии отзыва
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/includeInComment'
+        - $ref: '#/components/parameters/resourceId'
+        - required: false
+          in: query
+          name: page
+          description: Номер страницы
+          schema:
+            type: integer
+        - required: false
+          in: query
+          name: per_page
+          description: Кол-во результатов на страницу
+          schema:
+            type: integer
+            default: 25
+      responses:
+        '200':
+          $ref: '#/components/responses/CommentCollectionResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundErrorResponse'
+    post:
+      tags:
+        - Отзывы
+      summary: Добавление комментария к отзыву
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/resourceId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  $ref: '#/components/schemas/Comment'
+      responses:
+        '201':
+          $ref: '#/components/responses/CommentCreatedResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundErrorResponse'
+        '422':
+          $ref: '#/components/responses/ValidationErrorResponse'
+  /questions:
+    post:
+      tags:
+        - Вопросы
+      summary: Создание вопроса
+      description: |
+        Если параметр `product_id` не указан, то вопрос создается о компании, иначе вопрос о товаре.
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  $ref: '#/components/schemas/Question'
+      responses:
+        '201':
+          $ref: '#/components/responses/QuestionCreatedResponse'
+        '422':
+          $ref: '#/components/responses/ValidationErrorResponse'
+    get:
+      tags:
+        - Вопросы
+      summary: Cписок вопросов
+      deprecated: true
+      description: |
+        Получение списка вопросов согласно заданному фильтру.
+
+        Чтобы пройти весь набор целиком, используйте __Обход данных__:
+        `GET /scroll/questions`. Задачи на экспорт этот тип объектов
+        не поддерживают.
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/includeInQuestion'
+        - $ref: '#/components/parameters/filterInQuestion'
+        - $ref: '#/components/parameters/sortCollection'
+        - required: false
+          in: query
+          name: page
+          description: Номер страницы
+          schema:
+            type: integer
+            maximum: 50
+        - required: false
+          in: query
+          name: per_page
+          description: Кол-во результатов на страницу
+          schema:
+            type: integer
+            minimum: 5
+            maximum: 25
+      responses:
+        '200':
+          $ref: '#/components/responses/QuestionCollectionResponse'
+  /questions/{id}:
+    get:
+      tags:
+        - Вопросы
+      summary: Поиск вопроса по ID
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/includeInQuestion'
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '200':
+          $ref: '#/components/responses/QuestionResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundErrorResponse'
+    put:
+      tags:
+        - Вопросы
+      summary: Обновление вопроса по ID
+      description: |
+        Если вопрос с указанным ID не найден, то создается новый вопрос с `external_id` равным ID.
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/resourceId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  $ref: '#/components/schemas/Question'
+      responses:
+        '200':
+          $ref: '#/components/responses/QuestionUpdatedResponse'
+        '201':
+          $ref: '#/components/responses/QuestionCreatedResponse'
+    delete:
+      tags:
+        - Вопросы
+      summary: Удаление вопроса по ID
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '204':
+          description: Успешное удаление вопроса
+        '404':
+          $ref: '#/components/responses/NotFoundErrorResponse'
+  /questions/{id}/relationships/answers:
+    get:
+      tags:
+        - Вопросы
+      summary: Все ответы вопроса
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/includeInAnswer'
+        - $ref: '#/components/parameters/resourceId'
+        - required: false
+          in: query
+          name: page
+          description: Номер страницы
+          schema:
+            type: integer
+        - required: false
+          in: query
+          name: per_page
+          description: Кол-во результатов на страницу
+          schema:
+            type: integer
+            default: 25
+      responses:
+        '200':
+          $ref: '#/components/responses/AnswerCollectionResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundErrorResponse'
+    post:
+      tags:
+        - Вопросы
+      summary: Добавление ответа к вопросу
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/resourceId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  $ref: '#/components/schemas/Answer'
+      responses:
+        '201':
+          $ref: '#/components/responses/AnswerCreatedResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundErrorResponse'
+    put:
+      tags:
+        - Вопросы
+      summary: Обновление ответа к вопросу
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/resourceId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  $ref: '#/components/schemas/Answer'
+      responses:
+        '200':
+          $ref: '#/components/responses/AnswerCreatedResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundErrorResponse'
+  /orders:
+    post:
+      tags:
+        - Заказы
+      summary: Создание заказа
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  $ref: '#/components/schemas/Order'
+      responses:
+        '201':
+          $ref: '#/components/responses/OrderCreatedResponse'
+        '422':
+          $ref: '#/components/responses/ValidationErrorResponse'
+    get:
+      tags:
+        - Заказы
+      summary: Cписок заказов
+      deprecated: true
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/includeInOrder'
+        - $ref: '#/components/parameters/filterInOrder'
+        - $ref: '#/components/parameters/sortCollection'
+        - required: false
+          in: query
+          name: page
+          description: Номер страницы
+          schema:
+            type: integer
+            maximum: 50
+        - required: false
+          in: query
+          name: per_page
+          description: Кол-во результатов на страницу
+          schema:
+            type: integer
+            minimum: 5
+            maximum: 25
+      responses:
+        '200':
+          $ref: '#/components/responses/OrderCollectionResponse'
+  /orders/{id}:
+    get:
+      tags:
+        - Заказы
+      summary: Поиск заказа по ID
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/includeInOrder'
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '200':
+          $ref: '#/components/responses/OrderResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundErrorResponse'
+    put:
+      tags:
+        - Заказы
+      summary: Обновление заказа по ID
+      description: |
+        Если заказ с указанным ID не найден, то создается новый заказ с `number` равным ID.
+
+        Обновление объекта `details`:
+
+          * новые параметры добавляются
+          * существующие обновляются
+
+        Обновление объектов в: `order_lines`:
+
+          * полностью заменяется новым содержимым
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/resourceId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  $ref: '#/components/schemas/Order'
+      responses:
+        '200':
+          $ref: '#/components/responses/OrderUpdatedResponse'
+        '201':
+          $ref: '#/components/responses/OrderCreatedResponse'
+    delete:
+      tags:
+        - Заказы
+      summary: Удаление заказа по ID
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '204':
+          description: Успешное удаление заказа
+        '404':
+          $ref: '#/components/responses/NotFoundErrorResponse'
+  /products:
+    post:
+      tags:
+        - Продукты
+      summary: Создание продукта
+      description: |
+        Категория продукта будет, в порядке приоритета:
+
+        1. Найдена или создана по цепочке имён `category_names`, начиная с корневой категории.
+        2. Найдена по ID `category_id`.
+        3. Найдена по имени `category_name`.
+        4. Создана из `category_id` и `category_name`.
+        5. Создана из `category_name`; ID будет сгенерирован.
+
+        Если не указывать `category_names`, `category_id` или `category_name`, то товар привяжется к корневой категории.
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+                  required:
+                    - type
+                    - attributes
+                  properties:
+                    type:
+                      type: string
+                      description: Всегда __products__
+                      enum:
+                        - products
+                    attributes:
+                      $ref: '#/components/schemas/CreateProductAttributes'
+      responses:
+        '201':
+          $ref: '#/components/responses/ProductCreatedResponse'
+        '422':
+          $ref: '#/components/responses/ValidationErrorResponse'
+    get:
+      tags:
+        - Продукты
+      summary: Cписок продуктов
+      deprecated: true
+      description: |
+        Получение списка продуктов согласно заданному фильтру.
+
+        Вместо этого эндпоинта: для регулярной выгрузки рейтингов товаров
+        (и количества отзывов) — __Задачи на экспорт__ (см. дальше), для прохода
+        всего набора целиком — __Обход данных__, `GET /scroll/products`.
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/includeInProduct'
+        - $ref: '#/components/parameters/filterInProduct'
+        - $ref: '#/components/parameters/sortCollection'
+        - required: false
+          in: query
+          name: page
+          description: Номер страницы
+          schema:
+            type: integer
+            maximum: 50
+        - required: false
+          in: query
+          name: per_page
+          description: Кол-во результатов на страницу
+          schema:
+            type: integer
+            minimum: 5
+            maximum: 25
+      responses:
+        '200':
+          $ref: '#/components/responses/ProductCollectionResponse'
+  /products/{id}:
+    get:
+      tags:
+        - Продукты
+      summary: Поиск продукта по ID
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/includeInProduct'
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '200':
+          $ref: '#/components/responses/ProductResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundErrorResponse'
+    put:
+      tags:
+        - Продукты
+      summary: Обновление продукта по ID
+      description: |
+        Обновление объекта `custom_attributes`:
+
+          * новые параметры добавляются
+          * существующие обновляются
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/resourceId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  $ref: '#/components/schemas/Product'
+      responses:
+        '200':
+          $ref: '#/components/responses/ProductUpdatedResponse'
+    delete:
+      tags:
+        - Продукты
+      summary: Удаление продукта по ID
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '204':
+          description: Успешное удаление продукта
+        '404':
+          $ref: '#/components/responses/NotFoundErrorResponse'
+  /consumers:
+    post:
+      tags:
+        - Клиенты
+      summary: Создание клиента
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  $ref: '#/components/schemas/Consumer'
+      responses:
+        '201':
+          $ref: '#/components/responses/ConsumerCreatedResponse'
+        '422':
+          $ref: '#/components/responses/ValidationErrorResponse'
+    get:
+      tags:
+        - Клиенты
+      summary: Cписок клиентов
+      deprecated: true
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/includeInConsumer'
+        - $ref: '#/components/parameters/filterInConsumer'
+        - $ref: '#/components/parameters/sortCollection'
+        - required: false
+          in: query
+          name: page
+          description: Номер страницы
+          schema:
+            type: integer
+            maximum: 50
+        - required: false
+          in: query
+          name: per_page
+          description: Кол-во результатов на страницу
+          schema:
+            type: integer
+            minimum: 5
+            maximum: 25
+      responses:
+        '200':
+          $ref: '#/components/responses/ConsumerCollectionResponse'
+  /consumers/{id}:
+    get:
+      tags:
+        - Клиенты
+      summary: Поиск клиента по ID
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/includeInConsumer'
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConsumerResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundErrorResponse'
+    put:
+      tags:
+        - Клиенты
+      summary: Обновление клиенты по ID
+      description: |
+        Если клиент с указанным ID не найден, то создается новый клиент с `external_id` равным ID.
+
+        Обновление объекта `custom_attributes`:
+
+          * новые параметры добавляются
+          * существующие обновляются
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/resourceId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  $ref: '#/components/schemas/Consumer'
+      responses:
+        '200':
+          $ref: '#/components/responses/ConsumerUpdatedResponse'
+        '201':
+          $ref: '#/components/responses/ConsumerCreatedResponse'
+    delete:
+      tags:
+        - Клиенты
+      summary: Удаление клиента по ID
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '204':
+          description: Успешное удаление клиента
+        '404':
+          $ref: '#/components/responses/NotFoundErrorResponse'
+  /export_tasks:
+    post:
+      tags:
+        - Задачи на экспорт
+      summary: Создание задачи на экспорт одним файлом
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  $ref: '#/components/schemas/ExportTask'
+      responses:
+        '201':
+          $ref: '#/components/responses/ExportTaskCreatedResponse'
+        '422':
+          $ref: '#/components/responses/ValidationErrorResponse'
+  /export_tasks/{id}:
+    get:
+      tags:
+        - Задачи на экспорт
+      summary: Поиск задачи по ID
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '200':
+          $ref: '#/components/responses/ExportTaskResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundErrorResponse'
+  /users:
+    post:
+      tags:
+        - Пользователи
+      summary: Список пользователей
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  $ref: '#/components/schemas/User'
+      responses:
+        '200':
+          $ref: '#/components/responses/UserCollectionResponse'
+  /users/{id}:
+    get:
+      tags:
+        - Пользователи
+      summary: Поиск пользователя по ID
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/resourceId'
+      responses:
+        '200':
+          $ref: '#/components/responses/UserResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundErrorResponse'
+  /surveys:
+    get:
+      tags:
+        - Опросы
+      summary: Cписок опросов
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/includeInSurvey'
+        - $ref: '#/components/parameters/filterInSurvey'
+        - $ref: '#/components/parameters/sortCollection'
+        - required: false
+          in: query
+          name: page
+          description: Номер страницы
+          schema:
+            type: integer
+            maximum: 100
+        - required: false
+          in: query
+          name: per_page
+          description: Кол-во результатов на страницу
+          schema:
+            type: integer
+            maximum: 100
+      responses:
+        '200':
+          $ref: '#/components/responses/SurveyCollectionResponse'
+  /survey_responses:
+    get:
+      tags:
+        - Результаты опросов
+      summary: Cписок ответов на опросы
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/includeInSurveyResponse'
+        - $ref: '#/components/parameters/filterInSurveyResponse'
+        - $ref: '#/components/parameters/sortCollection'
+        - required: false
+          in: query
+          name: page
+          description: Номер страницы
+          schema:
+            type: integer
+            maximum: 50
+        - required: false
+          in: query
+          name: per_page
+          description: Кол-во результатов на страницу
+          schema:
+            type: integer
+            minimum: 5
+            maximum: 25
+      responses:
+        '200':
+          $ref: '#/components/responses/SurveyResponseCollectionResponse'
+  /scroll/{records_type}:
+    get:
+      tags:
+        - Обход данных
+      summary: Страница обхода
+      description: |
+        Первая страница — запрос без `cursor`, последующие — запрос с ним.
+        Алгоритм целиком, лимиты и поведение при повторах описаны в разделе
+        __Обход данных__ выше.
+      parameters:
+        - $ref: '#/components/parameters/authToken'
+        - $ref: '#/components/parameters/scrollRecordsType'
+        - $ref: '#/components/parameters/scrollCursor'
+        - $ref: '#/components/parameters/scrollFilter'
+        - $ref: '#/components/parameters/scrollSort'
+        - $ref: '#/components/parameters/scrollInclude'
+        - $ref: '#/components/parameters/scrollPerPage'
+      responses:
+        '200':
+          $ref: '#/components/responses/ScrollCollectionResponse'
+        '400':
+          $ref: '#/components/responses/InvalidCursorErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundErrorResponse'
+        '422':
+          $ref: '#/components/responses/ValidationErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsErrorResponse'
+        '503':
+          $ref: '#/components/responses/ScrollUnavailableResponse'
+components:
+  parameters:
+    authToken:
+      name: Authorization
+      in: header
+      description: |
+        Токен аутентификации в формате `Bearer {TOKEN}` 
+        (см. раздел Аутентификация выше)
+      required: true
+      schema:
+        type: string
+    sortCollection:
+      required: false
+      in: query
+      name: sort
+      description: |
+        Сортировка результатов.
+      schema:
+        type: string
+    resourceId:
+      required: true
+      in: path
+      name: id
+      description: Внутренний или внешний идентификатор объекта
+      schema:
+        type: string
+    filterInReview:
+      required: false
+      in: query
+      name: filter
+      description: |
+        Фильтр результатов. Параметры для фильтрации:
+
+        |    Параметр    |               Операторы               |            Возможные значения            |
+        | :------------- | :------------------------------------ | :--------------------------------------- |
+        | `context_type` | `eq`, `neq`                           | `store`, `product`, `category`,`brand`,  |
+        | `rating`       | `eq`, `gt`, `gte`, `lt`, `lte`, `neq` | `1…5`                                    |
+        | `product_id`   | `eq`                                  | __string__                               |
+        | `created_at`   | `eq`, `gt`, `gte`, `lt`, `lte`, `neq` | __date-time__                            |
+        | `updated_at`   | `eq`, `gt`, `gte`, `lt`, `lte`, `neq` | __date-time__                            |
+        | `state`        | `eq`, `neq`                           | `published`, `waiting`, `banned`, `held` |
+
+        Пример: `filter=rating:eq:2,state:eq:published`
+      schema:
+        type: string
+    includeInReview:
+      required: false
+      in: query
+      name: include
+      description: |
+        Массив объектов, которые должны включаться в ответ.
+        Значения разделяются запятыми. Пример: `include=product,author`
+      schema:
+        type: string
+        enum:
+          - author
+          - product
+          - comments
+          - state_changes
+    filterInConsumer:
+      required: false
+      in: query
+      name: filter
+      description: |
+        Фильтр результатов. Параметры для фильтрации:
+
+        |    Параметр    |               Операторы               | Возможные значения |
+        | :------------- | :------------------------------------ | :----------------- |
+        | `created_at`   | `eq`, `gt`, `gte`, `lt`, `lte`, `neq` | __date-time__      |
+        | `updated_at`   | `eq`, `gt`, `gte`, `lt`, `lte`, `neq` | __date-time__      |
+        | `unsubscribed` | `eq`, `neq`                           | __boolean__        |
+
+        Пример: `filter=unsubscribed:eq:true`
+      schema:
+        type: string
+    includeInConsumer:
+      required: false
+      in: query
+      name: include
+      description: |
+        Массив объектов, которые должны включаться в ответ.
+        Значения разделяются запятыми. Пример: `include=reviews,questions`
+      schema:
+        type: string
+        enum:
+          - reviews
+          - questions
+          - orders
+    includeInComment:
+      required: false
+      in: query
+      name: include
+      description: |
+        Массив объектов, которые должны включаться в ответ.
+        Значения разделяются запятыми. Пример: `include=author`
+      schema:
+        type: string
+        enum:
+          - author
+    filterInQuestion:
+      required: false
+      in: query
+      name: filter
+      description: |
+        Фильтр результатов. Параметры для фильтрации:
+
+        |    Параметр    |               Операторы               |            Возможные значения            |
+        | :------------- | :------------------------------------ | :--------------------------------------- |
+        | `context_type` | `eq`, `neq`                           | `store`, `product`, `category`,`brand`,  |
+        | `product_id`   | `eq`,                                 | __string__                               |
+        | `created_at`   | `eq`, `gt`, `gte`, `lt`, `lte`, `neq` | __date-time__                            |
+        | `updated_at`   | `eq`, `gt`, `gte`, `lt`, `lte`, `neq` | __date-time__                            |
+        | `state`        | `eq`, `neq`                           | `published`, `waiting`, `banned`, `held` |
+
+        Пример: `filter=product_id:eq:256788,state:eq:published`
+      schema:
+        type: string
+    includeInQuestion:
+      required: false
+      in: query
+      name: include
+      description: |
+        Массив объектов, которые должны включаться в ответ.
+        Значения разделяются запятыми. Пример: `include=answers`
+      schema:
+        type: string
+        enum:
+          - author
+          - product
+          - answers
+    includeInAnswer:
+      required: false
+      in: query
+      name: include
+      description: |
+        Массив объектов, которые должны включаться в ответ.
+        Значения разделяются запятыми. Пример: `include=author`
+      schema:
+        type: string
+        enum:
+          - author
+    filterInOrder:
+      required: false
+      in: query
+      name: filter
+      description: |
+        Фильтр результатов. Параметры для фильтрации:
+
+        | Параметр     | Операторы                             | Возможные значения                       |
+        | :---------   | :----------------------------------   | :---------------------------             |
+        | `created_at` | `eq`, `gt`, `gte`, `lt`, `lte`, `neq` | __date-time__                            |
+        | `updated_at` | `eq`, `gt`, `gte`, `lt`, `lte`, `neq` | __date-time__                            |
+
+        Пример: `filter=created_at:gte:2016-04-12T23:20:50.52Z`
+      schema:
+        type: string
+    includeInOrder:
+      required: false
+      in: query
+      name: include
+      description: |
+        Массив объектов, которые должны включаться в ответ.
+        Значения разделяются запятыми. Пример: `include=product`
+      schema:
+        type: string
+        enum:
+          - product
+          - consumer
+    filterInProduct:
+      required: false
+      in: query
+      name: filter
+      description: |
+        Фильтр результатов. Параметры для фильтрации:
+
+        |    Параметр    |               Операторы               |            Возможные значения            |
+        | :------------- | :------------------------------------ | :--------------------------------------- |
+        | `external_id`  | `eq`, `neq`, `in`                     | __string__                               |
+        | `vendor_code`  | `eq`, `neq`, `in`                     | __string__                               |
+        | `group_id`     | `eq`, `neq`, `in`                     | __string__                               |
+
+        Пример: `filter=external_id:in:a225|a226|a227`.
+      schema:
+        type: string
+    includeInProduct:
+      required: false
+      in: query
+      name: include
+      description: |
+        Массив объектов, которые должны включаться в ответ.
+        Значения разделяются запятыми. Пример: `include=reviews_summary_item`
+
+        Сводка отзывов приходит только так: собственного атрибута у товара нет.
+      schema:
+        type: string
+        enum:
+          - reviews_summary_item
+          - reviews
+          - questions
+          - brand
+          - category
+    filterInSurvey:
+      required: false
+      in: query
+      name: filter
+      description: |
+        Фильтр результатов. Параметры для фильтрации:
+
+        | Параметр       | Операторы                             | Возможные значения |
+        | :------------- | :------------------------------------ | :----------------- |
+        | `name`         | `eq`, `neq`                           | __string__         |
+        | `created_at`   | `eq`, `gt`, `gte`, `lt`, `lte`, `neq` | __date-time__      |
+        | `updated_at`   | `eq`, `gt`, `gte`, `lt`, `lte`, `neq` | __date-time__      |
+
+        Пример: `filter=name:eq:NPS`
+      schema:
+        type: string
+    includeInSurvey:
+      required: false
+      in: query
+      name: include
+      description: |
+        Массив объектов, которые должны включаться в ответ.
+        Значения разделяются запятыми. Пример: `include=questions`
+      schema:
+        type: string
+        enum:
+          - questions
+    filterInSurveyResponse:
+      required: false
+      in: query
+      name: filter
+      description: |
+        Фильтр результатов. Параметры для фильтрации:
+
+        | Параметр       | Операторы                             | Возможные значения |
+        | :------------- | :------------------------------------ | :----------------- |
+        | `survey_id`    | `eq`, `neq`                           | __string__         |
+        | `created_at`   | `eq`, `gt`, `gte`, `lt`, `lte`, `neq` | __date-time__      |
+        | `updated_at`   | `eq`, `gt`, `gte`, `lt`, `lte`, `neq` | __date-time__      |
+
+        Пример: `filter=survey_id:eq:592ee4696dbfd69acd73c0be`
+      schema:
+        type: string
+    includeInSurveyResponse:
+      required: false
+      in: query
+      name: include
+      description: |
+        Массив объектов, которые должны включаться в ответ.
+        Значения разделяются запятыми. Пример: `include=answers,author`
+      schema:
+        type: string
+        enum:
+          - answers
+          - author
+    scrollRecordsType:
+      required: true
+      in: path
+      name: records_type
+      description: Тип объектов, по которым идёт обход
+      schema:
+        type: string
+        enum:
+          - reviews
+          - products
+          - questions
+    scrollCursor:
+      required: false
+      in: query
+      name: cursor
+      description: |
+        Курсор с предыдущей страницы (`meta.cursor`). Без него открывается новый
+        обход, с ним — продолжается начатый; остальные параметры при продолжении
+        передавать не нужно.
+      schema:
+        type: string
+    scrollFilter:
+      required: false
+      in: query
+      name: filter
+      description: |
+        Фильтр результатов, синтаксис общий (см. раздел __Фильтрация__).
+        Задаётся только при открытии обхода. Набор параметров зависит от типа
+        объектов:
+
+        |     Тип     |                                                                                                   Параметры                                                                                                   |
+        | :---------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+        | `reviews`   | `created_at`, `updated_at`, `published_at`, `state`, `context_type`, `product_id`, `product_group_id`, `brand_id`, `category_id`, `rating`, `origin`, `syndication_source`, `order_number`, `lang`, `verified`, `featured`, `recommended` |
+        | `products`  | `created_at`, `updated_at`, `last_imported_at`, `summary_updated_at`, `external_id`, `group_id`, `brand_id`, `category_id`, `vendor_code`, `available`, `price`, `rating`                                      |
+        | `questions` | `created_at`, `updated_at`, `published_at`, `imported_at`, `state`, `context_type`, `product_id`, `product_external_id`, `product_group_id`, `brand_id`, `category_id`, `lang`, `origin`, `has_published_answers` |
+
+        В операторе `in` допустимо не больше 25 значений.
+        Неизвестный параметр — ответ `422`, неразбираемое выражение — `400`.
+
+        Если параметр не передан, применяется фильтр по умолчанию: `updated_at`
+        за последние 30 дней, см. раздел __Обход данных__.
+      schema:
+        type: string
+    scrollSort:
+      required: false
+      in: query
+      name: sort
+      description: |
+        Сортировка результатов, одно поле на запрос и только по возрастанию:
+        `updated_at:asc` или `created_at:asc`. По умолчанию — `updated_at:asc`.
+        Задаётся только при открытии обхода.
+      schema:
+        type: string
+        default: updated_at:asc
+        enum:
+          - updated_at:asc
+          - created_at:asc
+    scrollInclude:
+      required: false
+      in: query
+      name: include
+      description: |
+        Связанные объекты, которые попадут в `included`. Значения разделяются
+        запятыми, задаются только при открытии обхода. Набор зависит от типа
+        объектов:
+
+        |     Тип     |                Значения                 |
+        | :---------- | :-------------------------------------- |
+        | `reviews`   | `author`, `product`, `comments`, `state_changes` |
+        | `products`  | `reviews_summary_item`                  |
+        | `questions` | `author`, `product`, `answers`          |
+
+        Пример: `include=author,product`
+      schema:
+        type: string
+    scrollPerPage:
+      required: false
+      in: query
+      name: per_page
+      description: |
+        Кол-во объектов на страницу. Задаётся только при открытии обхода.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 100
+  responses:
+    NotFoundErrorResponse:
+      description: Объект не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ValidationErrorResponse:
+      description: Ошибка валидации
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    TooManyRequestsErrorResponse:
+      description: Слишком много запросов
+      headers:
+        X-RateLimit-Limit:
+          description: Допустимое кол-во запросов.
+          schema:
+            type: integer
+        X-RateLimit-Period:
+          description: За период.
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          description: Время следующего запроса.
+          schema:
+            type: string
+            format: date-time
+        Retry-After:
+          description: Через сколько секунд повторить запрос.
+          schema:
+            type: integer
+    ReviewCollectionResponse:
+      description: Список отзывов
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PersistedReview'
+              included:
+                description: Зависимые объекты, указанные в параметре `include`
+                type: array
+                items: {}
+    ReviewCreatedResponse:
+      description: Отзыв успешно создан
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/PersistedReview'
+    ReviewUpdatedResponse:
+      description: Отзыв успешно обновлен
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/PersistedReview'
+    ReviewResponse:
+      description: Отзыв
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/PersistedReview'
+              included:
+                description: Зависимые объекты, указанные в параметре `include`
+                type: array
+                items: {}
+          examples:
+            response:
+              value:
+                data:
+                  id: d41d8cd98f00b204e9800998ecf8427e
+                  type: reviews
+                  meta:
+                    ignore_invalid_photos: true
+                  attributes:
+                    pros: Одни преимущества
+                    cons: Отсутствуют
+                    body: Спасибо за платье! Отлично держит, приятное к телу, в общем супер! Завтра приеду за еще одним платьем! А может и двумя! Впереди юбилей и очередная свадьба))))) Спасибо большое! Буду заказывать еще обязательно!"
+                    rating: 5
+                    external_id: review-34772
+                    created_at: '2016-04-12T23:20:50.52Z'
+                    updated_at: '2016-05-12T11:50:23.52Z'
+                    published_at: '2016-05-12T11:50:23.52Z'
+                    author_name: Варвара Пуговицина
+                    author_email: varvara@pugovica.ru
+                    origin: omnibox
+                    recommended: true
+                    product_id: 444772
+                    photos:
+                      - https://shoppilot-ugc-media.s3.amazonaws.com/media_files/57d8/6f47/8ddf/872b/3a09/ec00/large.jpg?1473802054
+                    tags:
+                      - Featured
+                    custom_attributes:
+                      region: 66
+                    location_name: Екатеринбург
+                    relationships:
+                      author:
+                        data:
+                          id: d41d8cd98f00b204e9800998ecf8427e
+                          type: consumers
+                      product:
+                        data:
+                          id: 359da16916eebd1cc0a0884b3bad4f6d
+                          type: products
+                      comments: []
+    CommentCollectionResponse:
+      description: Список комментариев
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PersistedComment'
+              included:
+                description: Зависимые объекты, указанные в параметре `include`
+                type: array
+                items: {}
+    CommentCreatedResponse:
+      description: Комментарий успешно добавлен
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/PersistedComment'
+    QuestionCollectionResponse:
+      description: Список вопросов
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PersistedQuestion'
+              included:
+                description: Зависимые объекты, указанные в параметре `include`
+                type: array
+                items: {}
+    QuestionCreatedResponse:
+      description: Вопрос успешно создан
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/PersistedQuestion'
+    QuestionUpdatedResponse:
+      description: Вопрос успешно обновлен
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/PersistedQuestion'
+    QuestionResponse:
+      description: Вопрос
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/PersistedQuestion'
+              included:
+                description: Зависимые объекты, указанные в параметре `include`
+                type: array
+                items: {}
+    AnswerCollectionResponse:
+      description: Список ответов
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PersistedAnswer'
+              included:
+                description: Зависимые объекты, указанные в параметре `include`
+                type: array
+                items: {}
+    AnswerCreatedResponse:
+      description: Ответ успешно добавлен
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/PersistedAnswer'
+    OrderCreatedResponse:
+      description: Заказ успешно создан
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/PersistedOrder'
+    OrderUpdatedResponse:
+      description: Заказ успешно обновлен
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/PersistedOrder'
+    OrderCollectionResponse:
+      description: Список заказов
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PersistedOrder'
+              included:
+                description: Зависимые объекты, указанные в параметре `include`
+                type: array
+                items: {}
+    OrderResponse:
+      description: Заказ
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/PersistedOrder'
+              included:
+                description: Зависимые объекты, указанные в параметре `include`
+                type: array
+                items: {}
+    ProductCreatedResponse:
+      description: Продукт успешно создан
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/PersistedProduct'
+    ProductUpdatedResponse:
+      description: Продукт успешно обновлен
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/PersistedProduct'
+    ProductCollectionResponse:
+      description: Список продуктов
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PersistedProduct'
+              included:
+                description: Зависимые объекты, указанные в параметре `include`
+                type: array
+                items: {}
+    ProductResponse:
+      description: Продукт
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/PersistedProduct'
+              included:
+                description: Зависимые объекты, указанные в параметре `include`
+                type: array
+                items: {}
+    ConsumerCollectionResponse:
+      description: Список клиентов
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PersistedConsumer'
+              included:
+                description: Зависимые объекты, указанные в параметре `include`
+                type: array
+                items: {}
+    ConsumerCreatedResponse:
+      description: Клиент успешно добавлен
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/PersistedConsumer'
+    ConsumerUpdatedResponse:
+      description: Клиенты успешно обновлен
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/PersistedConsumer'
+    ConsumerResponse:
+      description: Клиент
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/PersistedConsumer'
+              included:
+                description: Зависимые объекты, указанные в параметре `include`
+                type: array
+                items: {}
+    SurveyCollectionResponse:
+      description: Список опросов
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PersistedSurvey'
+              included:
+                description: Зависимые объекты, указанные в параметре `include`
+                type: array
+                items: {}
+    SurveyResponseCollectionResponse:
+      description: Список ответов на опрос
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PersistedSurveyResponse'
+              included:
+                description: Зависимые объекты, указанные в параметре `include`
+                type: array
+                items: {}
+    ExportTaskCreatedResponse:
+      description: Создана задача на экспорт
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/ExportTaskPersisted'
+    ExportTaskResponse:
+      description: Задача на экспорт
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/ExportTaskPersisted'
+          examples:
+            response:
+              value:
+                data:
+                  id: d41d8cd98f00b204e9800998ecf8427e
+                  type: export_tasks
+                  attributes:
+                    archive_content_type: application/gzip
+                    archive_size: 19977923
+                    archive_url: http://e.shoppilot.ru/export_data/products-20180114-1-1cmh7jt.xlsx.gz?1579031282
+                    records_type: products
+                    search_options:
+                      encoded_query_filter: null
+                      filter: null
+                      query: null
+                      query_type: null
+                      sort: null
+                    started_at: '2020-01-14T22:45:16.257+03:00'
+                    completed_at: '2020-01-14T22:48:07.990+03:00'
+                    created_at: '2020-01-14T22:45:15.661+03:00'
+                    updated_at: '2020-01-14T22:48:07.990+03:00'
+                    state: completed
+    UserCollectionResponse:
+      description: Список пользователей
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+    UserResponse:
+      description: Пользователь
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '#/components/schemas/User'
+          examples:
+            response:
+              value:
+                data:
+                  id: d41d8cd98f00b204e9800998ecf8427e
+                  type: users
+                  attributes:
+                    email: medvedev@kremlin.ru
+                    name: Дмитрий Анатольевич Медведев
+                    first_name: Дмитрий
+                    occupation: Кормлю уточек
+                    avatar_url: null
+                    role: company_moderator
+    ScrollCollectionResponse:
+      description: Страница обхода
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                description: |
+                  Объекты запрошенного типа в том же виде, в каком их отдаёт
+                  соответствующий список
+                type: array
+                items:
+                  oneOf:
+                    - $ref: '#/components/schemas/PersistedReview'
+                    - $ref: '#/components/schemas/PersistedProduct'
+                    - $ref: '#/components/schemas/PersistedQuestion'
+              included:
+                description: Зависимые объекты, указанные в параметре `include`
+                type: array
+                items: {}
+              meta:
+                $ref: '#/components/schemas/ScrollMeta'
+              links:
+                description: На последней странице обхода ссылки `next` нет
+                type: object
+                properties:
+                  next:
+                    description: Адрес следующей страницы — тот же запрос с новым курсором
+                    type: string
+    InvalidCursorErrorResponse:
+      description: |
+        Курсор недействителен (подделан, выдан для другого типа объектов или для
+        другого запроса) либо выражение фильтра не разбирается
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ScrollUnavailableResponse:
+      description: |
+        На стороне поиска закончились снимки для обхода. Курсор остаётся
+        действительным, повторите запрос позже.
+      headers:
+        Retry-After:
+          description: Через сколько секунд повторить запрос.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    ObjectRef:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum:
+            - reviews
+            - comments
+            - consumers
+            - questions
+            - answers
+            - orders
+            - products
+    ConsumerAttributes:
+      type: object
+      required:
+        - email
+        - name
+      properties:
+        external_id:
+          type: string
+          description: Внешний идентификатор
+        email:
+          type: string
+          description: E-mail
+        name:
+          type: string
+          description: Полное имя
+        first_name:
+          type: string
+          description: Имя
+        phone:
+          type: string
+          description: Номер телефона
+        created_at:
+          type: string
+          format: date-time
+          description: Время создания
+        updated_at:
+          type: string
+          format: date-time
+          description: Время последнего обновления
+        unsubscribed:
+          type: boolean
+          description: Признак отписки от писем
+        complained:
+          type: boolean
+          description: Признак жалобы на спам
+        custom_attributes:
+          type: object
+          description: Произвольный набор атрибутов
+        avatar_url:
+          type: string
+          description: Урл аватара
+    Consumer:
+      type: object
+      required:
+        - type
+        - attributes
+      properties:
+        type:
+          type: string
+          description: Всегда __consumers__
+          enum:
+            - consumers
+        attributes:
+          $ref: '#/components/schemas/ConsumerAttributes'
+    ConsumerRelationships:
+      type: object
+      description: Зависимости
+      properties:
+        reviews:
+          description: Отзывы
+          type: array
+          items:
+            $ref: '#/components/schemas/ObjectRef'
+        questions:
+          description: Вопросы и ответы
+          type: array
+          items:
+            $ref: '#/components/schemas/ObjectRef'
+        orders:
+          description: Заказы
+          type: array
+          items:
+            $ref: '#/components/schemas/ObjectRef'
+    PersistedConsumer:
+      type: object
+      required:
+        - id
+        - type
+        - attributes
+      properties:
+        id:
+          type: string
+          description: Идентификатор клиента
+        type:
+          type: string
+          description: Всегда __consumers__
+          enum:
+            - consumers
+        attributes:
+          $ref: '#/components/schemas/ConsumerAttributes'
+        relationships:
+          $ref: '#/components/schemas/ConsumerRelationships'
+    ReviewAttributes:
+      type: object
+      required:
+        - body
+        - rating
+      properties:
+        external_id:
+          type: string
+          description: Внешний идентификатор отзыва
+        rating:
+          type: number
+          description: Рейтинг
+          maximum: 5
+          minimum: 1
+        pros:
+          type: string
+          description: Преимущества
+        cons:
+          type: string
+          description: Недостатки
+        body:
+          type: string
+          description: Комментарий. Хотя бы одно из полей `pros`, `cons` или `body` необходимо.
+        rating_details:
+          type: array
+          description: Детали рейтинга
+          items:
+            type: object
+            required:
+              - name
+              - label
+              - value
+            properties:
+              name:
+                type: string
+                description: Название (лучше по-английски)
+              label:
+                type: string
+                description: Лейбл
+              value:
+                type: number
+                description: Значение
+                format: float
+        author_details:
+          type: array
+          description: Детали автора
+          items:
+            type: object
+            required:
+              - name
+              - label
+              - value
+            properties:
+              name:
+                type: string
+                description: Название (лучше по-английски)
+              label:
+                type: string
+                description: Лейбл
+              value:
+                type: number
+                description: Значение
+                format: float
+        dimensions:
+          type: array
+          description: Качественные оценки по шкале от -100 до 100, где 0, это «норма» или «обычно». Например, можно спросить о соответствии обуви указанному размеру, где значения будут лежать на шкале от «Маломерит» до «Большемерит» со «Впору» между ними.
+          items:
+            type: object
+            required:
+              - name
+              - label
+              - label_min
+              - label_half
+              - label_max
+              - value
+            properties:
+              name:
+                type: string
+                description: Название (лучше по-английски)
+              label:
+                type: string
+                description: Лейбл
+              label_min:
+                type: string
+                description: Лейбл для начала шкалы
+              label_half:
+                type: string
+                description: Лейбл для середины шкалы
+              label_max:
+                type: string
+                description: Лейбл для конца шкалы
+              value:
+                type: integer
+                description: Значение от -100 до 100
+        created_at:
+          type: string
+          format: date-time
+          description: Время создания отзыва
+        updated_at:
+          type: string
+          format: date-time
+          description: Время последнего обновления отзыва
+        published_at:
+          type: string
+          format: date-time
+          description: Время публикации отзыва
+        imported_at:
+          type: string
+          format: date-time
+          description: Время импорта отзыва, если через API
+        author_name:
+          type: string
+          description: Имя автора
+        hide_my_data:
+          description: Скрывать данные автора
+          type: boolean
+        author_email:
+          type: string
+          description: E-mail автора
+        author_external_id:
+          type: string
+          description: Внешний идентификатор автора
+        author_avatar_url:
+          type: string
+          description: Ссылка на аватар автора
+        order_number:
+          type: string
+          description: Номер заказа, по которому оставлен отзыв
+        origin:
+          type: string
+          description: Источник отзыва
+        state:
+          type: string
+          description: Статус модерации
+          enum:
+            - published
+            - waiting
+            - banned
+            - held
+          default: waiting
+        product_id:
+          type: string
+          description: Идентификатор продукта, к которому привязан отзыв. Обычно это `offer.id` из YML файла
+        photos:
+          type: array
+          items:
+            type: string
+          description: Массив URL фотографий, прикрепленных к отзыву
+        videos:
+          type: array
+          items:
+            type: string
+          description: Массив URL видео, прикреплённых в отзыву
+        tags:
+          type: array
+          items:
+            type: string
+          description: Теги
+        recommended:
+          type: boolean
+          description: Рекоммендация
+        custom_attributes:
+          type: object
+          description: Произвольный набор атрибутов
+        location_name:
+          type: string
+          description: Локация
+        likes:
+          type: integer
+          description: Кол-во голосов, считающих отзыв полезным
+        dislikes:
+          type: integer
+          description: Кол-во голосов, считающих отзыв бесполезным
+        custom_source:
+          type: string
+          description: Название источника отзыва
+        custom_medium:
+          type: string
+          description: Тип источника отзыва
+        custom_campaign:
+          type: string
+          description: Название кампании
+    Review:
+      type: object
+      required:
+        - type
+        - attributes
+      properties:
+        type:
+          type: string
+          description: Всегда __reviews__
+          enum:
+            - reviews
+        attributes:
+          $ref: '#/components/schemas/ReviewAttributes'
+      example:
+        type: reviews
+        meta:
+          ignore_invalid_photos: true
+        attributes:
+          pros: Одни преимущества
+          cons: Отсутствуют
+          body: Спасибо за платье! Отлично держит, приятное к телу, в общем супер! Завтра приеду за еще одним платьем! А может и двумя! Впереди юбилей и очередная свадьба))))) Спасибо большое! Буду заказывать еще обязательно!"
+          rating: 5
+          external_id: review-34772
+          created_at: '2016-04-12T23:20:50.52Z'
+          updated_at: '2016-04-12T23:20:50.52Z'
+          author_name: Варвара Пуговицина
+          author_email: varvara@pugovica.ru
+          order_number: '31337'
+          origin: omnibox
+          recommended: true
+          product_id: '444772'
+          state: published
+          photos:
+            - https://shoppilot-ugc-media.s3.amazonaws.com/media_files/57d8/6f47/8ddf/872b/3a09/ec00/large.jpg?1473802054
+          tags:
+            - Featured
+          custom_attributes:
+            region: 66
+          location_name: Екатеринбург
+          rating_details:
+            - name: durability
+              label: Надежность
+              value: 4
+            - name: features
+              label: Возможности
+              value: 5
+          author_details:
+            - name: age
+              label: Возраст
+              value: 18-25 лет
+            - name: expirience
+              label: Опыт
+              value: Опытная домохозяйка
+    ReviewRelationships:
+      type: object
+      description: Зависимости
+      properties:
+        author:
+          type: object
+          description: Автор
+          properties:
+            data:
+              $ref: '#/components/schemas/ObjectRef'
+        product:
+          type: object
+          description: Продукт
+          properties:
+            data:
+              $ref: '#/components/schemas/ObjectRef'
+        comments:
+          description: Комментарии
+          type: array
+          items:
+            $ref: '#/components/schemas/ObjectRef'
+        state_changes:
+          description: История изменений статуса
+          type: array
+          items:
+            $ref: '#/components/schemas/ObjectRef'
+    PersistedReview:
+      type: object
+      required:
+        - id
+        - type
+        - attributes
+      properties:
+        id:
+          type: string
+          description: Идентификатор отзыва
+        type:
+          type: string
+          description: Всегда __reviews__
+          enum:
+            - reviews
+        attributes:
+          allOf:
+            - $ref: '#/components/schemas/ReviewAttributes'
+            - type: object
+              properties:
+                context_type:
+                  type: string
+                  description: Контекст отзыва. Определяет тип объкта, к которому привязан отзыв.
+                  enum:
+                    - product
+                    - brand
+                    - store
+                    - category
+        relationships:
+          $ref: '#/components/schemas/ReviewRelationships'
+    CommentAttributes:
+      type: object
+      required:
+        - text
+      properties:
+        external_id:
+          type: string
+          description: Внешний идентификатор комментария
+        text:
+          type: string
+          description: Текст комментария
+        author_name:
+          type: string
+          description: Имя автора
+        hide_my_data:
+          description: Скрывать данные автора
+          type: boolean
+        author_email:
+          type: string
+          description: Email автора
+        author_external_id:
+          type: string
+          description: Внешний идентификатор автора
+        author_avatar_url:
+          type: string
+          description: Ссылка на аватар автора
+        state:
+          type: string
+          description: Статус модерации
+          enum:
+            - published
+            - waiting
+            - banned
+        files:
+          type: array
+          description: Прикрепленные файлы
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                description: Название (имя файла)
+              content_type:
+                type: string
+                description: Mime type
+              size:
+                type: integer
+                description: Размер в байтах
+              url:
+                type: string
+                description: URL
+        parent_id:
+          type: string
+          description: Внутренний ID родительского комментария
+        external_parent_id:
+          type: string
+          description: Внешний ID родительского комментария
+    PersistedComment:
+      type: object
+      required:
+        - id
+        - type
+        - attributes
+      properties:
+        type:
+          type: string
+          description: Всегда __comments__
+          enum:
+            - comments
+        attributes:
+          $ref: '#/components/schemas/CommentAttributes'
+    Comment:
+      type: object
+      required:
+        - type
+        - attributes
+      properties:
+        type:
+          type: string
+          description: Всегда __comments__
+          enum:
+            - comments
+        attributes:
+          $ref: '#/components/schemas/CommentAttributes'
+    QuestionAttributes:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          description: Текст вопроса
+        external_id:
+          type: string
+          description: Внешний идентификатор
+        author_name:
+          type: string
+          description: Имя автора
+        hide_my_data:
+          description: Скрывать данные автора
+          type: boolean
+        author_email:
+          type: string
+          description: E-mail автора
+        author_external_id:
+          type: string
+          description: Внешний идентификатор автора
+        author_avatar_url:
+          type: string
+          description: Ссылка на аватар автора
+        product_id:
+          type: string
+          description: Идентификатор продукта, к которому привязан вопрос. Обычно это `offer.id` из YML файла.
+        state:
+          type: string
+          description: Статус модерации
+          enum:
+            - published
+            - waiting
+            - banned
+          default: waiting
+        tags:
+          type: array
+          items:
+            type: string
+          description: Теги
+        created_at:
+          type: string
+          format: date-time
+          description: Время создания
+        updated_at:
+          type: string
+          format: date-time
+          description: Время последнего обновления
+        files:
+          type: array
+          description: Прикрепленные файлы
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                description: Название (имя файла)
+              content_type:
+                type: string
+                description: Mime type
+              size:
+                type: integer
+                description: Размер в байтах
+              url:
+                type: string
+                description: URL
+    Question:
+      type: object
+      required:
+        - type
+        - attributes
+      properties:
+        type:
+          type: string
+          description: Всегда __questions__
+          enum:
+            - questions
+        attributes:
+          $ref: '#/components/schemas/QuestionAttributes'
+    QuestionRelationships:
+      type: object
+      description: Зависимости
+      properties:
+        author:
+          type: object
+          description: Автор
+          properties:
+            data:
+              $ref: '#/components/schemas/ObjectRef'
+        product:
+          type: object
+          description: Продукт
+          properties:
+            data:
+              $ref: '#/components/schemas/ObjectRef'
+        answers:
+          description: Ответы
+          type: array
+          items:
+            $ref: '#/components/schemas/ObjectRef'
+    PersistedQuestion:
+      type: object
+      required:
+        - id
+        - type
+        - attributes
+      properties:
+        id:
+          type: string
+          description: Идентификатор вопроса
+        type:
+          type: string
+          description: Всегда __questions__
+          enum:
+            - questions
+        attributes:
+          allOf:
+            - $ref: '#/components/schemas/QuestionAttributes'
+            - type: object
+              properties:
+                context_type:
+                  type: string
+                  description: Контекст вопроса. Определяет тип объкта, к которому привязан отзыв.
+                  enum:
+                    - product
+                    - brand
+                    - store
+                    - category
+        relationships:
+          $ref: '#/components/schemas/QuestionRelationships'
+    AnswerAttributes:
+      type: object
+      required:
+        - text
+      properties:
+        external_id:
+          type: string
+          description: Внешний идентификатор ответа
+        text:
+          type: string
+          description: Текст ответа
+        author_name:
+          type: string
+          description: Имя автора
+        hide_my_data:
+          description: Скрывать данные автора
+          type: boolean
+        author_email:
+          type: string
+          description: Email автора
+        author_external_id:
+          type: string
+          description: Внешний идентификатор автора
+        author_avatar_url:
+          type: string
+          description: Ссылка на аватар автора
+        state:
+          type: string
+          description: Статус модерации
+          enum:
+            - published
+            - waiting
+            - banned
+        files:
+          type: array
+          description: Прикрепленные файлы
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                description: Название (имя файла)
+              content_type:
+                type: string
+                description: Mime type
+              size:
+                type: integer
+                description: Размер в байтах
+              url:
+                type: string
+                description: URL
+        parent_id:
+          type: string
+          description: Внутренний ID родительского ответа
+        external_parent_id:
+          type: string
+          description: Внешний ID родительского ответа
+    PersistedAnswer:
+      type: object
+      required:
+        - id
+        - type
+        - attributes
+      properties:
+        id:
+          type: string
+          description: Идентификатор ответа
+        type:
+          type: string
+          description: Всегда __answers__
+          enum:
+            - answers
+        attributes:
+          $ref: '#/components/schemas/AnswerAttributes'
+    Answer:
+      type: object
+      required:
+        - type
+        - attributes
+      properties:
+        type:
+          type: string
+          description: Всегда __answers__
+          enum:
+            - answers
+        attributes:
+          $ref: '#/components/schemas/AnswerAttributes'
+    OrderAttributes:
+      type: object
+      required:
+        - consumer_name
+        - consumer_email
+        - order_lines
+      properties:
+        number:
+          type: string
+          description: Уникальный номер или внешний идентификатор заказа
+        details:
+          type: object
+          description: Произвольные атрибуты заказа
+        consumer_name:
+          type: string
+          description: Имя клиента
+        consumer_email:
+          type: string
+          description: Email клиента
+        consumer_phone:
+          type: string
+          description: Телефон клиента
+        order_lines:
+          type: array
+          description: Корзина заказа
+          items:
+            type: object
+            required:
+              - product_id
+            properties:
+              product_id:
+                type: string
+                description: Идентифкатор товара
+              name:
+                type: string
+                description: Название товара
+              price:
+                type: number
+                description: Цена покупки
+                format: float
+        created_at:
+          type: string
+          format: date-time
+          description: Время создания
+        updated_at:
+          type: string
+          format: date-time
+          description: Время создания
+    Order:
+      type: object
+      required:
+        - type
+        - attributes
+      properties:
+        type:
+          type: string
+          description: Всегда __orders__
+          enum:
+            - orders
+        attributes:
+          $ref: '#/components/schemas/OrderAttributes'
+      example:
+        type: orders
+        attributes:
+          number: order-number-1386
+          details:
+            payment_status: not-paid
+            fulfillment_status: packed
+            region: 74
+          order_lines:
+            - product_id: '45'
+              name: Ботинки ECCO 69
+              price: 6800
+    PersistedOrder:
+      type: object
+      required:
+        - id
+        - type
+        - attributes
+      properties:
+        id:
+          type: string
+          description: Идентифкатор заказа
+        type:
+          type: string
+          description: Всегда __orders__
+          enum:
+            - orders
+        attributes:
+          $ref: '#/components/schemas/OrderAttributes'
+        relationships:
+          $ref: '#/components/schemas/OrderRelationships'
+    OrderRelationships:
+      type: object
+      description: Зависимости
+      properties:
+        consumer:
+          type: object
+          description: Клиент
+          properties:
+            data:
+              $ref: '#/components/schemas/ObjectRef'
+        product:
+          type: object
+          description: Коллекция продуктов
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/ObjectRef'
+    ProductAttributes:
+      type: object
+      required:
+        - name
+        - external_id
+      properties:
+        external_id:
+          type: string
+          description: Внешний идентификатор
+        group_id:
+          type: string
+          description: Внешний идентификатор группы
+        rating:
+          type: number
+          description: Рейтинг
+          maximum: 5
+          minimum: 1
+        name:
+          type: string
+          description: Название
+        url:
+          type: string
+          description: URL карточки товара
+        description:
+          type: string
+          description: Описание
+        picture_urls:
+          type: array
+          description: Массив изображений
+          items:
+            type: string
+        price:
+          type: number
+          description: Цена
+        available:
+          type: boolean
+          description: Наличие
+        recommended_product_ids:
+          type: array
+          description: Массив из `external_id` рекомендуемых товаров
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+          description: Время создания
+        updated_at:
+          type: string
+          format: date-time
+          description: Время последнего обновления
+        reviews_count:
+          type: integer
+          description: Кол-во отзывов
+        qurestions_count:
+          type: integer
+          description: Кол-во вопросов
+        recommended:
+          type: number
+          description: Процент рекоммендующих
+          format: float
+        custom_attributes:
+          type: object
+          description: Произвольные атрибуты (только один уровень вложенности)
+    CreateProductAttributes:
+      type: object
+      required:
+        - name
+        - external_id
+      properties:
+        category_names:
+          type: array
+          description: Иерархический список имён категорий
+          items:
+            type: string
+        category_id:
+          type: string
+          description: ID категории
+        category_name:
+          type: string
+          description: Имя категории
+        brand_name:
+          type: string
+          description: Имя бренда/производителя
+        external_id:
+          type: string
+          description: Внешний идентификатор
+        group_id:
+          type: string
+          description: Внешний идентификатор группы
+        name:
+          type: string
+          description: Название
+        url:
+          type: string
+          description: URL карточки товара
+        description:
+          type: string
+          description: Описание
+        picture_urls:
+          type: array
+          description: Массив изображений
+          items:
+            type: string
+        price:
+          type: number
+          description: Цена
+        available:
+          type: boolean
+          description: Наличие
+        recommended_product_ids:
+          type: array
+          description: Массив из `external_id` рекомендуемых товаров
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+          description: Время создания
+        updated_at:
+          type: string
+          format: date-time
+          description: Время последнего обновления
+        custom_attributes:
+          type: object
+          description: Произвольные атрибуты (только один уровень вложенности)
+    Product:
+      type: object
+      required:
+        - type
+        - attributes
+      properties:
+        type:
+          type: string
+          description: Всегда __products__
+          enum:
+            - products
+        attributes:
+          $ref: '#/components/schemas/ProductAttributes'
+    ProductRelationships:
+      type: object
+      description: Зависимости
+      properties:
+        reviews:
+          description: Отзывы
+          type: array
+          items:
+            $ref: '#/components/schemas/ObjectRef'
+        questions:
+          description: Вопросы
+          type: array
+          items:
+            $ref: '#/components/schemas/ObjectRef'
+        brand:
+          type: object
+          description: Бренд
+          properties:
+            data:
+              $ref: '#/components/schemas/ObjectRef'
+        category:
+          type: object
+          description: Категория
+          properties:
+            data:
+              $ref: '#/components/schemas/ObjectRef'
+    PersistedProduct:
+      type: object
+      required:
+        - id
+        - type
+        - attributes
+      properties:
+        id:
+          type: string
+          description: Идентификатор продукта
+        type:
+          type: string
+          description: Всегда __products__
+          enum:
+            - products
+        attributes:
+          $ref: '#/components/schemas/ProductAttributes'
+        relationships:
+          $ref: '#/components/schemas/ProductRelationships'
+    SurveyAttributes:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Название опроса
+        state:
+          type: string
+          description: Статус
+          enum:
+            - active
+            - inactive
+            - archived
+        custom_css:
+          type: string
+          description: Дополнительные стили
+        intro_text:
+          type: string
+          description: Текст вверху опроса
+        footer_text:
+          type: string
+          description: Текст внизу опроса
+        post_message_text:
+          type: string
+          description: Текст после прохождения опроса
+    SurveyRelationships:
+      type: object
+      description: Зависимости
+      properties:
+        questions:
+          type: object
+          description: Вопросы
+          properties:
+            data:
+              $ref: '#/components/schemas/ObjectRef'
+    PersistedSurvey:
+      type: object
+      required:
+        - id
+        - type
+        - attributes
+      properties:
+        id:
+          type: string
+          description: Идентификатор опроса
+        type:
+          type: string
+          description: Всегда __surveys__
+          enum:
+            - surveys
+        attributes:
+          $ref: '#/components/schemas/SurveyAttributes'
+    Survey:
+      type: object
+      required:
+        - type
+        - attributes
+      properties:
+        id:
+          type: string
+          description: Идентификатор опроса
+        type:
+          type: string
+          description: Всегда __surveys__
+          enum:
+            - surveys
+        attributes:
+          $ref: '#/components/schemas/SurveyAttributes'
+        relationships:
+          $ref: '#/components/schemas/SurveyRelationships'
+    SurveyQuestionAttributes:
+      type: object
+      required:
+        - survey_id
+      properties:
+        survey_id:
+          type: string
+          description: Идентификатор опроса
+        type:
+          type: string
+          description: Тип вопроса
+          enum:
+            - text_question
+            - linear_scale_question
+        answer_value_type:
+          type: string
+          description: Тип ответа
+          enum:
+            - string
+            - number
+        order:
+          type: number
+          description: Порядковый номер вопроса
+        text:
+          type: string
+          description: Текст вопроса
+        params:
+          type: object
+          description: Параметры вопроса, зависят от типа
+          properties:
+            data:
+              $ref: '#/components/schemas/ObjectRef'
+    SurveyQuestionRelationships:
+      type: object
+      description: Зависимости
+      properties:
+        survey:
+          type: object
+          description: Опрос
+          properties:
+            data:
+              $ref: '#/components/schemas/ObjectRef'
+    PersistedSurveyQuestion:
+      type: object
+      required:
+        - id
+        - type
+        - attributes
+      properties:
+        id:
+          type: string
+          description: Идентификатор вопроса
+        type:
+          type: string
+          description: Всегда __survey_questions__
+        attributes:
+          $ref: '#/components/schemas/SurveyQuestionAttributes'
+        relationships:
+          $ref: '#/components/schemas/SurveyQuestionRelationships'
+    SurveyQuestion:
+      type: object
+      required:
+        - type
+        - attributes
+      properties:
+        id:
+          type: string
+          description: Идентификатор вопроса
+        type:
+          type: string
+          description: Всегда __survey_questions__
+          enum:
+            - survey_questions
+        attributes:
+          $ref: '#/components/schemas/SurveyQuestionAttributes'
+    SurveyResponseAttributes:
+      type: object
+      required:
+        - survey_id
+      properties:
+        survey_id:
+          type: string
+          description: Идентификатор опроса
+        location_name:
+          type: string
+          description: Локация
+        order_number:
+          type: string
+          description: Номер заказа
+        created_at:
+          type: string
+          format: date-time
+          description: Время создания
+        updated_at:
+          type: string
+          format: date-time
+          description: Время последнего обновления
+    SurveyResponseRelationships:
+      type: object
+      description: Зависимости
+      properties:
+        author:
+          type: object
+          description: Автор
+          properties:
+            data:
+              $ref: '#/components/schemas/ObjectRef'
+        answers:
+          type: object
+          description: Ответы
+          properties:
+            data:
+              $ref: '#/components/schemas/ObjectRef'
+    PersistedSurveyResponse:
+      type: object
+      required:
+        - id
+        - type
+        - attributes
+      properties:
+        id:
+          type: string
+          description: Идентификатор ответа на опрос
+        type:
+          type: string
+          description: Всегда __survey_responses__
+        attributes:
+          $ref: '#/components/schemas/SurveyResponseAttributes'
+        relationships:
+          $ref: '#/components/schemas/SurveyResponseRelationships'
+    SurveyResponse:
+      type: object
+      required:
+        - type
+        - attributes
+      properties:
+        id:
+          type: string
+          description: Идентификатор ответа на опрос
+        type:
+          type: string
+          description: Всегда __survey_responses__
+          enum:
+            - survey_responses
+        attributes:
+          $ref: '#/components/schemas/SurveyResponseAttributes'
+    SurveyAnswerAttributes:
+      type: object
+      required:
+        - question_id
+      properties:
+        value:
+          type: string
+          description: Ответ
+        value_type:
+          type: string
+          description: Тип ответа
+          enum:
+            - string
+            - number
+        question_id:
+          type: string
+          description: Идентификатор вопроса
+        question_type:
+          type: string
+          description: Тип вопроса
+          enum:
+            - text_question
+            - linear_scale_question
+    SurveyAnswerRelationships:
+      type: object
+      description: Зависимости
+      properties:
+        response:
+          type: object
+          description: Ответ на опрос
+          properties:
+            data:
+              $ref: '#/components/schemas/ObjectRef'
+    PersistedSurveyAnswer:
+      type: object
+      required:
+        - id
+        - type
+        - attributes
+      properties:
+        id:
+          type: string
+          description: Идентификатор ответа на вопрос
+        type:
+          type: string
+          description: Всегда __survey_answers__
+        attributes:
+          $ref: '#/components/schemas/SurveyAnswerAttributes'
+        relationships:
+          $ref: '#/components/schemas/SurveyAnswerRelationships'
+    SurveyAnswer:
+      type: object
+      required:
+        - type
+        - attributes
+      properties:
+        id:
+          type: string
+          description: Идентификатор ответа на вопрос
+        type:
+          type: string
+          description: Всегда __survey_answers__
+          enum:
+            - survey_answers
+        attributes:
+          $ref: '#/components/schemas/SurveyAnswerAttributes'
+    ExportTaskAttributes:
+      type: object
+      properties:
+        records_type:
+          type: string
+          description: Тип записей, которые необходимо экспортировать
+          enum:
+            - reviews
+            - products
+            - survey_responses
+        search_options:
+          type: object
+          description: Фильтр для экспорта. Если не указывается, выгружаются все записи.
+        format:
+          type: string
+          description: Формат файла.
+          enum:
+            - csv
+            - xlsx
+            - jsonl
+        export_format:
+          type: string
+          description: |
+            Кастомный [JQ фильтр](https://stedolan.github.io/jq/manual/)
+            для трансформации экспортируемых объектов.
+            Работает только для форматов `csv` и `xlsx`.
+    ExportTask:
+      type: object
+      required:
+        - type
+        - attributes
+      properties:
+        type:
+          type: string
+          description: Всегда __export_tasks__
+          enum:
+            - export_tasks
+        attributes:
+          $ref: '#/components/schemas/ExportTaskAttributes'
+    ExportTaskPersisted:
+      type: object
+      required:
+        - id
+        - type
+      properties:
+        id:
+          type: string
+          description: Идентификатор задачи
+        type:
+          type: string
+          description: Всегда __export_tasks__
+          enum:
+            - export_tasks
+        attributes:
+          allOf:
+            - $ref: '#/components/schemas/ExportTaskAttributes'
+            - type: object
+              properties:
+                state:
+                  type: string
+                  description: Статус задачи
+                  enum:
+                    - waiting
+                    - processing
+                    - completed
+                    - suspended
+                archive_content_type:
+                  type: string
+                  description: MIME тип архива
+                archive_size:
+                  type: number
+                  description: Размер архива в байтах
+                archive_url:
+                  type: string
+                  description: URL архива с файлом в выбранном формате
+                created_at:
+                  type: string
+                  format: date-time
+                  description: Время создания задачи
+                started_at:
+                  type: string
+                  format: date-time
+                  description: Время начала экспорта
+                suspended_at:
+                  type: string
+                  format: date-time
+                  description: Время отмены экспорта
+                completed_at:
+                  type: string
+                  format: date-time
+                  description: Время завершения успешного экспорта
+                rejected_at:
+                  type: string
+                  format: date-time
+                  description: Время завершения экспорта с ошибкой
+                rejection_message:
+                  type: string
+                  description: Причина ошибки экспорта
+    UserAttributes:
+      type: object
+      properties:
+        email:
+          type: string
+          description: Email
+        name:
+          type: string
+          description: ФИО
+        first_name:
+          type: string
+          description: Имя
+        occupation:
+          type: string
+          description: Дескриптор (обычно должность)
+        avatar_url:
+          type: string
+          description: URL аватара
+        role:
+          type: string
+          description: Роль
+          enum:
+            - company_manager
+            - company_moderator
+            - company_admin
+            - admin
+    User:
+      type: object
+      required:
+        - type
+        - attributes
+      properties:
+        type:
+          type: string
+          description: Всегда __users__
+          enum:
+            - users
+        attributes:
+          $ref: '#/components/schemas/UserAttributes'
+    ScrollMeta:
+      type: object
+      required:
+        - has_more
+        - count
+      properties:
+        has_more:
+          description: Остались ли ещё страницы. `false` — обход закончен
+          type: boolean
+        count:
+          description: Кол-во объектов на этой странице
+          type: integer
+        cursor:
+          description: Курсор следующей страницы. Отсутствует на последней странице
+          type: string
+        total_count:
+          description: Всего объектов в выдаче. Отдаётся только на первой странице
+          type: integer
+        applied_filter:
+          description: |
+            Фильтр, подставленный сервером вместо непереданного `filter`.
+            Приходит только на первой странице и только когда дефолт применён
+          type: string
+    Error:
+      type: object
+      properties:
+        status:
+          type: string
+        title:
+          type: string
+        details:
+          type: array
+          items:
+            type: string

@@ -1,8 +1,15 @@
 #:schema https://mise.jdx.dev/schema/mise.json
 
+[tools]
+cargo-dist = "0.33.0"
+
 [tools.rust]
 version = "1.98.1"
 components = "rustfmt,clippy,rust-src"
+targets = "x86_64-unknown-linux-musl"
 
 [env]
 RUST_BACKTRACE = "1"
+# ring (через rustls) компилирует C-код; для musl-таргета локально хватает clang.
+# В CI cargo-dist ставит musl-tools сам, эта переменная там не нужна.
+CC_x86_64_unknown_linux_musl = "clang"
