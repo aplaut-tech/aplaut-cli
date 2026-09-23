@@ -317,3 +317,18 @@ pub fn first_page_json(
     }
     page.to_string()
 }
+
+/// Как `aplaut`, но без ожидания: тест сам читает stdout (например, закрывает его раньше времени).
+pub fn spawn(home: &Path, args: &[&str], env: &[(&str, &str)]) -> std::process::Child {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_aplaut"));
+    cmd.args(args)
+        .env_clear()
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join("config"))
+        .env("PATH", std::env::var("PATH").unwrap_or_default());
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.spawn().expect("запуск aplaut")
+}
