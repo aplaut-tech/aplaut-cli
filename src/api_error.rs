@@ -63,11 +63,19 @@ pub fn from_response(
                 .retryable(true)
                 .with_hint(format!("{when}повторите позже и не запускайте параллельно несколько выгрузок с одним ключом"))
         }
-        500..=599 => CliError::general(
-            "server_error",
-            parsed.message_or(format!("сервер вернул {status}")),
-        )
-        .retryable(true),
+        500..=599 => {
+            let err = CliError::general(
+                "server_error",
+                parsed.message_or(format!("сервер вернул {status}")),
+            )
+            .retryable(true);
+            match headers.retry_after.as_deref() {
+                Some(after) => err.with_hint(format!(
+                    "сервер временно недоступен и просит повторить через {after} с (Retry-After); запустите позже"
+                )),
+                None => err,
+            }
+        }
         300..=399 => CliError::general(
             "unexpected_redirect",
             format!(

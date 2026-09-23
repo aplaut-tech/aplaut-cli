@@ -28,6 +28,18 @@ const RATE_LIMIT_JITTER_MS: u64 = 250;
 /// Дольше не ждём молча: лучше явная ошибка с временем сброса, чем «зависший» cron.
 const MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(300);
 
+/// Код ошибки, когда неизвестно, обработал ли сервер запрос (обрыв после отправки, таймаут, 5xx).
+pub const OUTCOME_UNKNOWN: &str = "request_outcome_unknown";
+
+/// Можно ли повторить запрос. Курсор scroll не идемпотентен (стейджинг, 2026-09-23): повтор
+/// тем же курсором отдаёт *следующую* страницу, поэтому продолжение обхода повторяется только
+/// тогда, когда сервер его точно не обработал — иначе страница молча пропадёт.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Replay {
+    Safe,
+    OnlyIfUnprocessed,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pace {
     Default,
@@ -74,7 +86,12 @@ impl ApiClient {
         clock: Rc<dyn Clock>,
         reporter: Rc<Reporter>,
     ) -> Self {
-        let agent: ureq::Agent = ureq::Agent::config_builder()
+        let mut config = ureq::Agent::config_builder();
+        // http к localhost идёт открытым текстом; прокси из HTTP(S)_PROXY увидел бы токен.
+        if crate::auth::url_is_loopback(&settings.base_url) {
+            config = config.proxy(None);
+        }
+        let agent: ureq::Agent = config
             .http_status_as_error(false)
             .timeout_global(Some(settings.timeout))
             // Редирект у API — признак ошибки в base URL; Authorization ureq всё равно не переносит.
@@ -101,6 +118,26 @@ impl ApiClient {
         path: &str,
         query: &[(&str, &str)],
         pace: Pace,
+    ) -> Result<ApiResponse, CliError> {
+        self.request(path, query, pace, Replay::Safe)
+    }
+
+    /// Продолжение обхода по курсору: повторяется только после 429, 503 и ошибок соединения,
+    /// до которых запрос не дошёл до сервера; иначе — ошибка `OUTCOME_UNKNOWN`.
+    pub fn get_continuation(
+        &mut self,
+        path: &str,
+        query: &[(&str, &str)],
+    ) -> Result<ApiResponse, CliError> {
+        self.request(path, query, Pace::Scroll, Replay::OnlyIfUnprocessed)
+    }
+
+    fn request(
+        &mut self,
+        path: &str,
+        query: &[(&str, &str)],
+        pace: Pace,
+        replay: Replay,
     ) -> Result<ApiResponse, CliError> {
         let url = format!("{}{}", self.settings.base_url, path);
         let mut attempt = 0u32;
@@ -131,6 +168,12 @@ impl ApiClient {
                             request_id: resp.headers.request_id,
                         });
                     }
+                    let unprocessed = matches!(resp.status, 429 | 503);
+                    if replay == Replay::OnlyIfUnprocessed && resp.status >= 500 && !unprocessed {
+                        return Err(self
+                            .outcome_unknown(&format!("сервер ответил {}", resp.status))
+                            .with_request_id(resp.headers.request_id.clone()));
+                    }
                     match self.retry_delay(&resp, attempt) {
                         Some(delay) if attempt < self.settings.max_retries => {
                             self.note_retry(
@@ -145,6 +188,13 @@ impl ApiClient {
                 }
                 Err(err) => {
                     let error = self.transport_error(&err);
+                    let never_sent = matches!(
+                        err,
+                        ureq::Error::ConnectionFailed | ureq::Error::HostNotFound
+                    );
+                    if replay == Replay::OnlyIfUnprocessed && !never_sent {
+                        return Err(self.outcome_unknown(&error.message));
+                    }
                     if !error.retryable || attempt >= self.settings.max_retries {
                         return Err(error);
                     }
@@ -229,13 +279,17 @@ impl ApiClient {
                 };
                 (delay <= MAX_RATE_LIMIT_WAIT).then_some(delay)
             }
-            503 => Some(
-                resp.headers
+            503 => {
+                let delay = resp
+                    .headers
                     .retry_after
                     .as_deref()
                     .and_then(parse_retry_after)
-                    .unwrap_or_else(|| backoff(attempt, &mut self.jitter)),
-            ),
+                    .unwrap_or_else(|| backoff(attempt, &mut self.jitter));
+                // Тот же потолок, что для 429: страница техработ с Retry-After на часы не должна
+                // превращать cron-задачу в молча висящий процесс.
+                (delay <= MAX_RATE_LIMIT_WAIT).then_some(delay)
+            }
             500..=599 => Some(backoff(attempt, &mut self.jitter)),
             _ => None,
         }
@@ -256,6 +310,13 @@ impl ApiClient {
         err.message = self.token.redact(&err.message);
         err.hint = err.hint.map(|h| self.token.redact(&h));
         err
+    }
+
+    fn outcome_unknown(&self, reason: &str) -> CliError {
+        CliError::general(
+            OUTCOME_UNKNOWN,
+            format!("{reason}; неизвестно, обработал ли сервер запрос"),
+        )
     }
 
     fn transport_error(&self, err: &ureq::Error) -> CliError {

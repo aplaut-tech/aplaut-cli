@@ -36,6 +36,14 @@ pub struct ScrollState {
     pub total_count: Option<u64>,
     pub applied_filter: Option<String>,
     pub completed: bool,
+    /// Запрос продолжения ушёл, а его страница ещё не зафиксирована. Курсор не идемпотентен
+    /// (повтор отдаёт следующую страницу), поэтому после сбоя позиция сервера неизвестна.
+    #[serde(default)]
+    pub in_flight: bool,
+    /// Поле сортировки последней выданной записи: граница для безопасного продолжения
+    /// новым обходом, если позиция курсора неизвестна.
+    #[serde(default)]
+    pub last_sort_value: Option<String>,
     #[serde(default)]
     pub saved_at: String,
 }
@@ -52,6 +60,8 @@ impl ScrollState {
             total_count: None,
             applied_filter: None,
             completed: false,
+            in_flight: false,
+            last_sort_value: None,
             saved_at: String::new(),
         }
     }

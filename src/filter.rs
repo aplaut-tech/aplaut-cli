@@ -21,6 +21,19 @@ pub enum Op {
 }
 
 impl Op {
+    fn name(self) -> &'static str {
+        match self {
+            Op::Gt => "gt",
+            Op::Gte => "gte",
+            Op::Lt => "lt",
+            Op::Lte => "lte",
+            Op::Eq => "eq",
+            Op::Neq => "neq",
+            Op::In => "in",
+            Op::Exists => "exists",
+        }
+    }
+
     fn parse(s: &str) -> Option<Op> {
         Some(match s {
             "gt" => Op::Gt,
@@ -111,6 +124,28 @@ pub fn check_per_page(per_page: u32, min: u32, max: u32) -> Result<(), CliError>
     .with_field("per_page"))
 }
 
+/// Фильтр для продолжения новым обходом: нижняя граница `field` заменяется на `value`,
+/// остальные условия пользователя сохраняются. Невалидный исходный фильтр сюда не попадает:
+/// он проверен до первого запроса.
+pub fn with_lower_bound(expr: Option<&str>, field: &str, value: &str) -> String {
+    let mut clauses: Vec<Clause> = expr
+        .and_then(|e| parse_filter(e).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| !(c.param == field && matches!(c.op, Op::Gt | Op::Gte)))
+        .collect();
+    clauses.push(Clause {
+        param: field.to_string(),
+        op: Op::Gte,
+        values: vec![value.to_string()],
+    });
+    clauses
+        .iter()
+        .map(|c| format!("{}:{}:{}", c.param, c.op.name(), c.values.join("|")))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 fn parse_clause(block: &str) -> Result<Clause, CliError> {
     let block = block.trim();
     // Значение — всё после второго двоеточия: в датах своих двоеточий хватает.
@@ -157,6 +192,30 @@ mod tests {
     use super::*;
 
     const ALLOWED: &[&str] = &["updated_at", "rating", "state"];
+
+    #[test]
+    fn lower_bound_replaces_only_the_sort_field_bound() {
+        assert_eq!(
+            with_lower_bound(
+                Some("updated_at:gte:2020-01-01T00:00:00Z,rating:in:4|5"),
+                "updated_at",
+                "2021-02-02T00:00:00Z"
+            ),
+            "rating:in:4|5,updated_at:gte:2021-02-02T00:00:00Z"
+        );
+        assert_eq!(
+            with_lower_bound(None, "created_at", "x"),
+            "created_at:gte:x"
+        );
+        assert_eq!(
+            with_lower_bound(
+                Some("updated_at:lt:2030-01-01T00:00:00Z"),
+                "updated_at",
+                "y"
+            ),
+            "updated_at:lt:2030-01-01T00:00:00Z,updated_at:gte:y"
+        );
+    }
 
     #[test]
     fn filter_value_keeps_colons() {

@@ -73,7 +73,7 @@ impl fmt::Debug for ProfileCredentials {
 }
 
 pub fn load_config(paths: &Paths) -> Result<ConfigFile, CliError> {
-    load_toml(&paths.config).map_err(|message| CliError::general("config_invalid", message))
+    load_toml(&paths.config, false).map_err(|message| CliError::general("config_invalid", message))
 }
 
 pub fn load_credentials(paths: &Paths, reporter: &Reporter) -> Result<CredentialsFile, CliError> {
@@ -83,7 +83,7 @@ pub fn load_credentials(paths: &Paths, reporter: &Reporter) -> Result<Credential
             paths.credentials.display()
         ));
     }
-    load_toml(&paths.credentials)
+    load_toml(&paths.credentials, true)
         .map_err(|message| CliError::general("credentials_invalid", message))
 }
 
@@ -95,19 +95,30 @@ pub fn save_credentials(paths: &Paths, credentials: &CredentialsFile) -> Result<
     save_toml(paths, &paths.credentials, credentials)
 }
 
-/// Текст ошибки — только `message()` без цитаты строки: в `credentials` это был бы токен.
-fn load_toml<T: DeserializeOwned + Default>(path: &Path) -> Result<T, String> {
-    match fs::read_to_string(path) {
-        Ok(text) => toml::from_str(&text).map_err(|e| {
+/// Сообщения парсера toml об ошибках типов цитируют значение (`invalid type: string "…"`),
+/// а в `credentials` значение — это токен. Поэтому для секретного файла выводим только
+/// номер строки, а текст парсера — лишь для `config.toml`, где секретов нет.
+fn load_toml<T: DeserializeOwned + Default>(path: &Path, secret: bool) -> Result<T, String> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(T::default()),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    toml::from_str(&text).map_err(|e| {
+        let line = e
+            .span()
+            .map(|span| format!(" (строка {})", text[..span.start].matches('\n').count() + 1))
+            .unwrap_or_default();
+        if secret {
+            format!("{}: не удалось разобрать TOML{line}", path.display())
+        } else {
             format!(
-                "{}: не удалось разобрать TOML: {}",
+                "{}: не удалось разобрать TOML{line}: {}",
                 path.display(),
                 e.message()
             )
-        }),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(T::default()),
-        Err(e) => Err(format!("{}: {e}", path.display())),
-    }
+        }
+    })
 }
 
 fn save_toml<T: Serialize>(paths: &Paths, path: &Path, value: &T) -> Result<(), CliError> {
@@ -213,24 +224,32 @@ mod tests {
 
     #[test]
     fn broken_credentials_error_does_not_echo_token() {
-        let p = paths("broken");
-        fs::create_dir_all(&p.dir).unwrap();
-        fs::write(
-            &p.credentials,
+        // Синтаксическая ошибка и ошибки типов: сообщения toml для последних цитируют значение.
+        let shapes = [
             "[profiles.ci]\naccess_token = \"super-secret-token\n",
-        )
-        .unwrap();
-        fs::set_permissions(&p.credentials, fs::Permissions::from_mode(0o600)).unwrap();
-        let reporter =
-            Reporter::with_writer(false, false, false, false, Box::new(SharedBuf::default()));
-        let err = load_credentials(&p, &reporter).unwrap_err();
-        assert_eq!(err.code, "credentials_invalid");
-        assert!(
-            !err.message.contains("super-secret-token"),
-            "{}",
-            err.message
-        );
-        fs::remove_dir_all(p.dir.parent().unwrap()).unwrap();
+            "[profiles]\ndefault = \"super-secret-token\"\n",
+            "profiles = \"super-secret-token\"\n",
+            "[profiles.ci]\naccess_token = 12345678901234\n",
+        ];
+        for (i, text) in shapes.iter().enumerate() {
+            let p = paths(&format!("broken{i}"));
+            fs::create_dir_all(&p.dir).unwrap();
+            fs::write(&p.credentials, text).unwrap();
+            fs::set_permissions(&p.credentials, fs::Permissions::from_mode(0o600)).unwrap();
+            let reporter =
+                Reporter::with_writer(false, false, false, false, Box::new(SharedBuf::default()));
+            let err = load_credentials(&p, &reporter).unwrap_err();
+            assert_eq!(err.code, "credentials_invalid");
+            for secret in ["super-secret-token", "12345678901234"] {
+                assert!(!err.message.contains(secret), "{i}: {}", err.message);
+            }
+            assert!(
+                err.message.contains("строка"),
+                "{i}: номер строки помогает найти ошибку: {}",
+                err.message
+            );
+            fs::remove_dir_all(p.dir.parent().unwrap()).unwrap();
+        }
     }
 
     #[test]

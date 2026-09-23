@@ -212,6 +212,11 @@ impl MockServer {
         format!("http://{}/v4", self.addr)
     }
 
+    /// `http://127.0.0.1:PORT` — например, чтобы выдать сервер за прокси.
+    pub fn origin(&self) -> String {
+        format!("http://{}", self.addr)
+    }
+
     pub fn requests(&self) -> Vec<RecordedRequest> {
         self.requests.lock().unwrap().clone()
     }

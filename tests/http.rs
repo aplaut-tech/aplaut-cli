@@ -232,3 +232,66 @@ fn redirect_is_not_followed() {
     assert_eq!(err.code, "unexpected_redirect");
     assert_eq!(server.requests().len(), 1);
 }
+
+#[test]
+fn long_503_retry_after_fails_fast_instead_of_sleeping_for_hours() {
+    let server = MockServer::start(vec![
+        Reply::text(503, "maintenance").with_header("Retry-After", "7200")
+    ]);
+    let (mut api, clock, _) = client(&server, 6);
+    let err = api.get("/x", &[], Pace::Default).unwrap_err();
+    assert_eq!(
+        (err.code.as_str(), err.exit),
+        ("server_error", Exit::General)
+    );
+    assert!(err.retryable);
+    assert!(
+        err.hint.as_deref().unwrap_or_default().contains("7200"),
+        "{err:?}"
+    );
+    assert!(clock.sleeps().is_empty(), "{:?}", clock.sleeps());
+    assert_eq!(server.requests().len(), 1);
+}
+
+// Курсор scroll не идемпотентен (стейджинг, 2026-09-23): повтор тем же курсором отдаёт
+// следующую страницу. Продолжение можно повторять, только если сервер его точно не обработал.
+
+#[test]
+fn continuation_is_not_replayed_after_dropped_connection() {
+    let server = MockServer::start(vec![Reply::Hangup, Reply::json(200, "{}")]);
+    let (mut api, _, _) = client(&server, 6);
+    let err = api
+        .get_continuation("/scroll/reviews", &[("cursor", "c1")])
+        .unwrap_err();
+    assert_eq!(err.code, aplaut_cli::http::OUTCOME_UNKNOWN);
+    assert!(!err.retryable);
+    assert_eq!(server.requests().len(), 1);
+}
+
+#[test]
+fn continuation_is_not_replayed_after_500() {
+    let server = MockServer::start(vec![Reply::text(500, "oops"), Reply::json(200, "{}")]);
+    let (mut api, _, _) = client(&server, 6);
+    let err = api
+        .get_continuation("/scroll/reviews", &[("cursor", "c1")])
+        .unwrap_err();
+    assert_eq!(err.code, aplaut_cli::http::OUTCOME_UNKNOWN);
+    assert_eq!(server.requests().len(), 1);
+}
+
+#[test]
+fn continuation_is_replayed_after_429_and_503() {
+    let server = MockServer::start(vec![
+        Reply::text(429, "Throttled\n").with_header("Retry-After", "1"),
+        Reply::text(503, "").with_header("Retry-After", "1"),
+        Reply::json(200, "{}"),
+    ]);
+    let (mut api, _, _) = client(&server, 6);
+    api.get_continuation("/scroll/reviews", &[("cursor", "c1")])
+        .unwrap();
+    assert_eq!(server.requests().len(), 3);
+    assert!(server
+        .requests()
+        .iter()
+        .all(|r| r.query_param("cursor") == Some("c1")));
+}

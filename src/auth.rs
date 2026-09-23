@@ -78,10 +78,12 @@ pub struct StdinSource<'a> {
     pub reader: &'a mut dyn Read,
 }
 
+/// `load_credentials` вызывается только в ветках профиля: сломанный `credentials` не должен
+/// мешать запуску с токеном из флага или env (и не должен светиться в его ошибках).
 pub fn resolve_token(
     flags: &TokenFlags,
     env: &EnvSnapshot,
-    creds: &CredentialsFile,
+    load_credentials: &mut dyn FnMut() -> Result<CredentialsFile, CliError>,
     stdin: &mut StdinSource,
 ) -> Result<(Secret, TokenSource), CliError> {
     if flags.token_stdin {
@@ -97,7 +99,7 @@ pub fn resolve_token(
     }
     if let Some(name) = flags.profile {
         return Ok((
-            profile_token(creds, name)?,
+            profile_token(&load_credentials()?, name)?,
             TokenSource::Profile(name.to_string()),
         ));
     }
@@ -109,11 +111,11 @@ pub fn resolve_token(
     }
     if let Some(name) = &env.profile {
         return Ok((
-            profile_token(creds, name)?,
+            profile_token(&load_credentials()?, name)?,
             TokenSource::EnvProfile(name.clone()),
         ));
     }
-    match creds.profiles.get(DEFAULT_PROFILE) {
+    match load_credentials()?.profiles.get(DEFAULT_PROFILE) {
         Some(entry) => Ok((parse_token(&entry.access_token)?, TokenSource::DefaultProfile)),
         None => Err(CliError::new(Exit::Auth, "no_token", "токен не найден").with_hint(
             "выполните aplaut auth login или передайте токен через --token-file / APLAUT_ACCESS_TOKEN_FILE",
@@ -174,16 +176,26 @@ pub fn validate_profile_name(name: &str) -> Result<(), CliError> {
     .with_hint("используйте латиницу, цифры, - и _"))
 }
 
+/// `--base-url` → (без явного `--profile`) `APLAUT_BASE_URL` → `base_url` профиля → прод.
+/// Явный `--profile` сильнее env (D5): иначе токен профиля ушёл бы на адрес из окружения.
+/// Конфиг профиля загружается лениво — только если до него дошла очередь.
 pub fn resolve_base_url(
     flag: Option<&str>,
     env: &EnvSnapshot,
-    profile: Option<&ProfileConfig>,
+    profile_flag: bool,
+    load_profile: &mut dyn FnMut() -> Result<Option<ProfileConfig>, CliError>,
 ) -> Result<String, CliError> {
-    let raw = flag
-        .map(str::to_string)
-        .or_else(|| env.base_url.clone())
-        .or_else(|| profile.and_then(|p| p.base_url.clone()))
-        .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
+    let from_env = if profile_flag {
+        None
+    } else {
+        env.base_url.clone()
+    };
+    let raw = match flag.map(str::to_string).or(from_env) {
+        Some(url) => url,
+        None => load_profile()?
+            .and_then(|p| p.base_url)
+            .unwrap_or_else(|| DEFAULT_BASE_URL.to_string()),
+    };
     validate_base_url(&raw)
 }
 
@@ -209,6 +221,13 @@ pub fn validate_base_url(raw: &str) -> Result<String, CliError> {
         .with_hint("используйте https://; http допустим только для localhost")),
         _ => Err(bad()),
     }
+}
+
+/// Хост из base URL — loopback? Для таких адресов прокси из окружения не используется.
+pub fn url_is_loopback(url: &str) -> bool {
+    url.split_once("://")
+        .and_then(|(_, rest)| host_of(rest.split(['/', '?', '#']).next().unwrap_or("")))
+        .is_some_and(is_loopback)
 }
 
 pub fn is_loopback(host: &str) -> bool {
@@ -272,7 +291,8 @@ mod tests {
             is_terminal: tty,
             reader: &mut reader,
         };
-        resolve_token(flags, env, creds, &mut src).map(|(s, src)| (s.expose().to_string(), src))
+        let mut load = || Ok(creds.clone());
+        resolve_token(flags, env, &mut load, &mut src).map(|(s, src)| (s.expose().to_string(), src))
     }
 
     fn no_flags() -> TokenFlags<'static> {
@@ -399,23 +419,40 @@ mod tests {
             base_url: Some("https://env.example/v4".into()),
             ..EnvSnapshot::default()
         };
-        let profile = ProfileConfig {
-            base_url: Some("https://profile.example/v4".into()),
+        let profile = |url: Option<&str>| {
+            let p = ProfileConfig {
+                base_url: url.map(str::to_string),
+            };
+            move || -> Result<Option<ProfileConfig>, CliError> { Ok(Some(p.clone())) }
         };
+        let stored = Some("https://profile.example/v4");
         assert_eq!(
-            resolve_base_url(Some("https://flag.example/v4/"), &env, Some(&profile)).unwrap(),
+            resolve_base_url(
+                Some("https://flag.example/v4/"),
+                &env,
+                true,
+                &mut profile(stored)
+            )
+            .unwrap(),
             "https://flag.example/v4"
         );
+        // Профиль из APLAUT_PROFILE/default: env сильнее сохранённого base_url.
         assert_eq!(
-            resolve_base_url(None, &env, Some(&profile)).unwrap(),
+            resolve_base_url(None, &env, false, &mut profile(stored)).unwrap(),
             "https://env.example/v4"
         );
+        // Явный --profile сильнее env (D5): его base_url или прод, но не APLAUT_BASE_URL —
+        // иначе прод-токен профиля уехал бы на стенд из .envrc.
         assert_eq!(
-            resolve_base_url(None, &EnvSnapshot::default(), Some(&profile)).unwrap(),
+            resolve_base_url(None, &env, true, &mut profile(stored)).unwrap(),
             "https://profile.example/v4"
         );
         assert_eq!(
-            resolve_base_url(None, &EnvSnapshot::default(), None).unwrap(),
+            resolve_base_url(None, &env, true, &mut profile(None)).unwrap(),
+            DEFAULT_BASE_URL
+        );
+        assert_eq!(
+            resolve_base_url(None, &EnvSnapshot::default(), false, &mut || Ok(None)).unwrap(),
             DEFAULT_BASE_URL
         );
         for ok in [

@@ -2,13 +2,19 @@
 //!
 //! Стейт сохраняется только после записи страницы и только в точках фиксации формата:
 //! он никогда не указывает на данные, которых нет у приёмника (at-least-once).
+//!
+//! Курсор не идемпотентен (стейджинг, 2026-09-23): повтор тем же курсором отдаёт следующую
+//! страницу. Поэтому перед каждым продолжением стейт помечается `in_flight`, а после сбоя с
+//! неизвестным исходом слепое продолжение по курсору запрещено — предлагается новый обход
+//! с границы последней выданной записи.
 
 use std::collections::HashSet;
 use std::path::Path;
 
 use crate::clock::Clock;
 use crate::error::CliError;
-use crate::http::{ApiClient, Pace};
+use crate::filter;
+use crate::http::{self, ApiClient, Pace};
 use crate::output::{Commit, RecordSink};
 use crate::page::Page;
 use crate::state::{self, ScrollParams, ScrollState};
@@ -44,7 +50,10 @@ pub fn run(
     reporter: &Reporter,
     clock: &dyn Clock,
 ) -> Result<ScrollOutcome, CliError> {
-    let mut state = initial_state(job)?;
+    let (mut state, loaded) = initial_state(job)?;
+    // Последний сохранённый стейт: только его можно помечать `in_flight` — он указывает на
+    // данные, уже зафиксированные у приёмника.
+    let mut durable: Option<ScrollState> = loaded.then(|| state.clone());
     let mut outcome = ScrollOutcome {
         completed: state.completed,
         already_completed: state.completed,
@@ -61,9 +70,30 @@ pub fn run(
         let opening = state.cursor.is_none();
         let query = request_query(&state);
         let query: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        let response = api
-            .get(&path, &query, Pace::Scroll)
-            .map_err(|e| partial_if(e, outcome.emitted))?;
+        let response = if opening {
+            api.get(&path, &query, Pace::Scroll)
+        } else {
+            // Отметка — до отправки: даже SIGKILL посреди запроса не приведёт к слепому продолжению.
+            mark_in_flight(job.state_path, &mut durable, clock)
+                .map_err(|e| partial_if(e, outcome.emitted))?;
+            api.get_continuation(&path, &query)
+        };
+        let response = match response {
+            Ok(response) => response,
+            Err(err) if err.code == http::OUTCOME_UNKNOWN => {
+                let at = durable.as_ref().unwrap_or(&state);
+                return Err(partial_if(
+                    interrupted(err, at, job.state_path),
+                    outcome.emitted,
+                ));
+            }
+            Err(err) => {
+                // Сервер запрос не обработал (429, 503, 4xx, нет соединения) — курсор годен.
+                clear_in_flight(job.state_path, &mut durable, clock)
+                    .map_err(|e| partial_if(e, outcome.emitted))?;
+                return Err(partial_if(err, outcome.emitted));
+            }
+        };
         let request_id = response.request_id.clone();
         let page = Page::parse(response.body)
             .map_err(|e| partial_if(e.with_request_id(request_id.clone()), outcome.emitted))?;
@@ -85,6 +115,9 @@ pub fn run(
             ));
         }
         let seen: HashSet<String> = state.last_page_ids.iter().cloned().collect();
+        // Прогресс меряем новыми id, а не записанным: raw пишет и повторы, но зациклившийся
+        // сервер должен останавливать обход в любом формате.
+        let new_records = page.ids().iter().filter(|id| !seen.contains(*id)).count();
         let report = sink
             .write_page(&page, &seen)
             .map_err(|e| partial_if(e, outcome.emitted))?;
@@ -95,8 +128,13 @@ pub fn run(
         state.last_page_ids = page.ids();
         state.cursor = page.meta.cursor.clone();
         state.completed = !page.meta.has_more;
+        if let Some(value) = last_sort_value(&page, &state.params.sort) {
+            state.last_sort_value = Some(value);
+        }
         if report.commit == Commit::Durable {
+            state.in_flight = false;
             save(job.state_path, &mut state, clock).map_err(|e| partial_if(e, outcome.emitted))?;
+            durable = Some(state.clone());
         }
         reporter.progress(&progress_line(
             job.records_type,
@@ -106,11 +144,7 @@ pub fn run(
         if state.completed {
             break;
         }
-        stale_pages = if report.written == 0 {
-            stale_pages + 1
-        } else {
-            0
-        };
+        stale_pages = if new_records == 0 { stale_pages + 1 } else { 0 };
         if stale_pages >= MAX_STALE_PAGES {
             return Err(partial_if(
                 CliError::general(
@@ -127,6 +161,7 @@ pub fn run(
         }
     }
     if sink.finish().map_err(|e| partial_if(e, outcome.emitted))? == Commit::Durable {
+        state.in_flight = false;
         save(job.state_path, &mut state, clock).map_err(|e| partial_if(e, outcome.emitted))?;
     }
     reporter.clear_progress();
@@ -136,8 +171,9 @@ pub fn run(
     Ok(outcome)
 }
 
-/// Если часть данных уже ушла в stdout, любая ошибка — «частичный успех» (код 4):
-/// приёмник должен откатить загрузку, а не решить, что данных не было.
+/// Если часть данных уже ушла в stdout, любая ошибка — «частичный успех» (код 4): приёмник
+/// должен знать, что выгрузка не завершена. Выданные записи целые — со `--state` их
+/// сохраняют и продолжают, без него выгружают заново.
 fn partial_if(err: CliError, emitted: u64) -> CliError {
     if emitted > 0 {
         err.into_partial()
@@ -146,17 +182,113 @@ fn partial_if(err: CliError, emitted: u64) -> CliError {
     }
 }
 
-fn initial_state(job: &ScrollJob) -> Result<ScrollState, CliError> {
+fn initial_state(job: &ScrollJob) -> Result<(ScrollState, bool), CliError> {
     let fresh = || ScrollState::new(job.records_type, job.params.clone());
     let Some(path) = job.state_path else {
-        return Ok(fresh());
+        return Ok((fresh(), false));
     };
     match state::load(path)? {
         Some(saved) => {
             saved.check_matches(job.records_type, &job.params, path)?;
-            Ok(saved)
+            if saved.in_flight {
+                return Err(CliError::usage(
+                    "scroll_position_uncertain",
+                    format!(
+                        "прошлый запуск по стейту {} прервался во время запроса продолжения: позиция обхода на сервере неизвестна",
+                        path.display()
+                    ),
+                )
+                .with_hint(resume_hint(&saved, Some(path))));
+            }
+            Ok((saved, true))
         }
-        None => Ok(fresh()),
+        None => Ok((fresh(), false)),
+    }
+}
+
+fn mark_in_flight(
+    path: Option<&Path>,
+    durable: &mut Option<ScrollState>,
+    clock: &dyn Clock,
+) -> Result<(), CliError> {
+    match (path, durable.as_mut()) {
+        (Some(path), Some(saved)) if !saved.in_flight => {
+            saved.in_flight = true;
+            state::save(path, saved, clock.unix_millis())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn clear_in_flight(
+    path: Option<&Path>,
+    durable: &mut Option<ScrollState>,
+    clock: &dyn Clock,
+) -> Result<(), CliError> {
+    match (path, durable.as_mut()) {
+        (Some(path), Some(saved)) if saved.in_flight => {
+            saved.in_flight = false;
+            state::save(path, saved, clock.unix_millis())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn interrupted(err: CliError, at: &ScrollState, path: Option<&Path>) -> CliError {
+    CliError::general(
+        "scroll_interrupted",
+        format!("обход прерван: {}", err.message),
+    )
+    .with_request_id(err.request_id)
+    .with_hint(resume_hint(at, path))
+}
+
+/// Повтор курсора пропустил бы страницу, поэтому безопасное продолжение — новый обход
+/// с границы последней выданной записи (записи на границе придут повторно).
+fn resume_hint(at: &ScrollState, path: Option<&Path>) -> String {
+    let Some(value) = &at.last_sort_value else {
+        return "сервер мог уже сдвинуть позицию обхода, а повтор курсора пропустил бы страницу: начните выгрузку заново".into();
+    };
+    let field = sort_field(&at.params.sort);
+    let filter = shell_word(&filter::with_lower_bound(
+        at.params.filter.as_deref(),
+        field,
+        value,
+    ));
+    let new_state = if path.is_some() {
+        " --state <новый файл>"
+    } else {
+        ""
+    };
+    format!(
+        "сервер мог уже сдвинуть позицию обхода, а повтор курсора пропустил бы страницу. \
+         Продолжите новым обходом с границы последней выданной записи: --filter {filter}{new_state}; \
+         записи на границе придут повторно — уберите дубли по id"
+    )
+}
+
+fn sort_field(sort: &str) -> &str {
+    sort.split(':').next().unwrap_or(sort)
+}
+
+fn last_sort_value(page: &Page, sort: &str) -> Option<String> {
+    let field = sort_field(sort);
+    page.data
+        .last()?
+        .get("attributes")?
+        .get(field)?
+        .as_str()
+        .map(str::to_string)
+}
+
+/// Значение для копирования в шелл: в кавычках, если в нём есть что-то кроме безопасных символов.
+fn shell_word(s: &str) -> String {
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || "_:.,@%+=/-".contains(c))
+    {
+        s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
     }
 }
 

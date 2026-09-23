@@ -283,7 +283,7 @@ fn partial_failure_exits_4_with_flushed_stdout() {
     let err = out.error_json();
     assert_eq!(
         (err["ok"].as_bool(), err["error"]["code"].as_str()),
-        (Some(false), Some("network_error"))
+        (Some(false), Some("scroll_interrupted"))
     );
     let saved: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&state).unwrap()).unwrap();
@@ -510,4 +510,90 @@ fn state_file_for_other_resource_is_usage_error() {
     );
     assert_eq!(out.code, 2);
     assert_eq!(out.error_json()["error"]["code"], "state_mismatch");
+}
+
+#[test]
+fn env_token_works_despite_broken_credentials_file() {
+    let home = TempDir::new("broken-creds");
+    let dir = home.path().join("config/aplaut");
+    fs::create_dir_all(&dir).unwrap();
+    let creds = dir.join("credentials");
+    fs::write(&creds, "[profiles]\ndefault = \"stored-secret-token\"\n").unwrap();
+    fs::set_permissions(&creds, fs::Permissions::from_mode(0o600)).unwrap();
+    let server = MockServer::start(vec![one_page()]);
+    let url = server.base_url();
+    let out = aplaut(
+        home.path(),
+        &scroll("reviews", &url, &[]),
+        &[("APLAUT_ACCESS_TOKEN", "tok")],
+        "",
+    );
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    assert!(
+        !out.stderr.contains("stored-secret-token"),
+        "{}",
+        out.stderr
+    );
+    assert_eq!(
+        server.requests()[0].header("authorization"),
+        Some("Bearer tok")
+    );
+}
+
+#[test]
+fn exit_4_guidance_does_not_tell_state_users_to_roll_back() {
+    // Со --state стейт уже сдвинут за выданные страницы: откат + повторный запуск = дыра в данных.
+    let home = TempDir::new("help-exit4");
+    let out = aplaut(home.path(), &["reviews", "scroll", "--help"], &[], "");
+    assert_eq!(out.code, 0);
+    let help = out.stdout.replace('\n', " ");
+    assert!(!help.contains("откатите загрузку)"), "{}", out.stdout);
+    assert!(
+        help.contains("со --state оставьте полученное"),
+        "{}",
+        out.stdout
+    );
+    assert!(help.contains("без --state"), "{}", out.stdout);
+}
+
+#[test]
+fn loopback_base_url_bypasses_proxy_from_env() {
+    // http к localhost идёт открытым текстом: через прокси это отдало бы ему токен.
+    let home = TempDir::new("proxy");
+    let proxy = MockServer::start(vec![]);
+    let server = MockServer::start(vec![one_page()]);
+    let url = server.base_url();
+    let proxy_url = proxy.origin();
+    let env = [
+        ("APLAUT_ACCESS_TOKEN", "tok-proxy"),
+        ("HTTP_PROXY", proxy_url.as_str()),
+        ("HTTPS_PROXY", proxy_url.as_str()),
+        ("ALL_PROXY", proxy_url.as_str()),
+    ];
+    let out = aplaut(
+        home.path(),
+        &scroll("reviews", &url, &["--max-retries", "0"]),
+        &env,
+        "",
+    );
+    assert!(
+        proxy.requests().is_empty(),
+        "прокси получил запрос: {:?}",
+        proxy.requests()
+    );
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    assert_eq!(server.requests().len(), 1);
+}
+
+#[test]
+fn max_records_help_says_the_boundary_is_a_page() {
+    // Обрезать страницу нельзя: остаток пришлось бы добирать повтором курсора, а он
+    // не идемпотентен — страница бы потерялась.
+    let home = TempDir::new("help-max");
+    let out = aplaut(home.path(), &["reviews", "scroll", "--help"], &[], "");
+    assert!(
+        out.stdout.replace('\n', " ").contains("граница — страница"),
+        "{}",
+        out.stdout
+    );
 }

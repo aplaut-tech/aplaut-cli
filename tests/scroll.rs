@@ -261,7 +261,7 @@ fn failure_mid_walk_is_partial_and_state_points_to_last_saved_page() {
     let err = result.unwrap_err();
     assert_eq!(
         (err.exit, err.code.as_str()),
-        (Exit::Partial, "network_error")
+        (Exit::Partial, "scroll_interrupted")
     );
     assert_eq!(out.lines().count(), 2, "страница до сбоя целиком в stdout");
     let saved = state::load(&path).unwrap().unwrap();
@@ -413,4 +413,115 @@ fn pending_sink_failure_leaves_no_state() {
     let job = job(Some(FILTER), Some(&path));
     assert!(scroll::run(&mut client, &mut sink, &job, &h.reporter, h.clock.as_ref()).is_err());
     assert!(!path.exists());
+}
+
+#[test]
+fn stale_pages_stop_the_walk_in_raw_too() {
+    // raw не отбрасывает повторы, но и зациклившийся обход должен остановиться (новых id нет).
+    let dir = TempDir::new("stale-raw");
+    let path = dir.path().join("state.json");
+    let mut saved = ScrollState::new("reviews", params(Some(FILTER)));
+    saved.cursor = Some("c0".into());
+    saved.last_page_ids = vec!["r1".into()];
+    state::save(&path, &mut saved, 0).unwrap();
+    let pages: Vec<Reply> = (1..=9)
+        .map(|i| {
+            Reply::json(
+                200,
+                page_json(&[review("r1", "t1")], Some(&format!("c{i}")), true),
+            )
+        })
+        .collect();
+    let h = harness(pages);
+    let (result, _) = run(&h, Format::Raw, &job(Some(FILTER), Some(&path)), 0);
+    assert_eq!(result.unwrap_err().code, "no_progress");
+    assert_eq!(h.server.requests().len(), 3);
+}
+
+#[test]
+fn interrupted_continuation_marks_state_and_next_run_refuses_blind_resume() {
+    let dir = TempDir::new("inflight");
+    let path = dir.path().join("state.json");
+    let h = harness(vec![
+        Reply::json(
+            200,
+            first_page_json(
+                &[
+                    review("r1", "2021-01-01T00:00:00Z"),
+                    review("r2", "2021-02-02T00:00:00Z"),
+                ],
+                Some("c1"),
+                true,
+                9,
+                None,
+            ),
+        ),
+        Reply::Hangup,
+    ]);
+    let (result, out) = run(&h, Format::Jsonl, &job(Some(FILTER), Some(&path)), 6);
+    let err = result.unwrap_err();
+    assert_eq!(
+        (err.exit, err.code.as_str()),
+        (Exit::Partial, "scroll_interrupted")
+    );
+    assert_eq!(
+        h.server.requests().len(),
+        2,
+        "продолжение не повторяется вслепую"
+    );
+    assert_eq!(out.lines().count(), 2);
+    let hint = err.hint.unwrap();
+    assert!(
+        hint.contains("updated_at:gte:2021-02-02T00:00:00Z") && !hint.contains("2020-01-01"),
+        "{hint}"
+    );
+    let saved = state::load(&path).unwrap().unwrap();
+    assert!(saved.in_flight, "стейт помнит, что запрос был в полёте");
+    assert_eq!(
+        saved.last_sort_value.as_deref(),
+        Some("2021-02-02T00:00:00Z")
+    );
+
+    let again = harness(vec![]);
+    let (result, _) = run(&again, Format::Jsonl, &job(Some(FILTER), Some(&path)), 6);
+    let err = result.unwrap_err();
+    assert_eq!(
+        (err.exit, err.code.as_str()),
+        (Exit::Usage, "scroll_position_uncertain")
+    );
+    assert!(err
+        .hint
+        .unwrap()
+        .contains("--filter updated_at:gte:2021-02-02T00:00:00Z"));
+    assert!(
+        again.server.requests().is_empty(),
+        "по неизвестной позиции не ходим"
+    );
+}
+
+#[test]
+fn rate_limited_continuation_keeps_cursor_resumable() {
+    let dir = TempDir::new("inflight-429");
+    let path = dir.path().join("state.json");
+    let h = harness(vec![
+        Reply::json(
+            200,
+            first_page_json(&[review("r1", "t1")], Some("c1"), true, 9, None),
+        ),
+        Reply::text(429, "Throttled\n").with_header("Retry-After", "1"),
+    ]);
+    let (result, _) = run(&h, Format::Jsonl, &job(Some(FILTER), Some(&path)), 0);
+    assert_eq!(result.unwrap_err().code, "rate_limited");
+    let saved = state::load(&path).unwrap().unwrap();
+    assert!(
+        !saved.in_flight,
+        "429 сервер не обработал — курсор по-прежнему годен"
+    );
+    let again = harness(vec![Reply::json(
+        200,
+        page_json(&[review("r2", "t2")], None, false),
+    )]);
+    let (result, _) = run(&again, Format::Jsonl, &job(Some(FILTER), Some(&path)), 0);
+    result.unwrap();
+    assert_eq!(again.server.requests()[0].query_param("cursor"), Some("c1"));
 }

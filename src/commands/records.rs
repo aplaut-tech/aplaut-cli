@@ -88,8 +88,10 @@ pub fn scroll_params(args: &ScrollArgs, spec: &ScrollSpec) -> Result<ScrollParam
 }
 
 fn connect(ctx: &Ctx) -> Result<ApiClient, CliError> {
-    let paths = Paths::resolve(&ctx.env)?;
-    let credentials = config::load_credentials(&paths, &ctx.reporter)?;
+    // Каталог конфигурации и credentials нужны только для профиля: запуск с токеном из флага
+    // или env не должен зависеть ни от HOME, ни от исправности чужих файлов.
+    let mut load_credentials =
+        || config::load_credentials(&Paths::resolve(&ctx.env)?, &ctx.reporter);
     let flags = TokenFlags {
         token_stdin: ctx.global.token_stdin,
         token_file: ctx.global.token_file.as_deref(),
@@ -102,13 +104,24 @@ fn connect(ctx: &Ctx) -> Result<ApiClient, CliError> {
         is_terminal,
         reader: &mut lock,
     };
-    let (token, token_source) = auth::resolve_token(&flags, &ctx.env, &credentials, &mut source)?;
+    let (token, token_source) =
+        auth::resolve_token(&flags, &ctx.env, &mut load_credentials, &mut source)?;
     let profile = auth::active_profile(ctx.global.profile.as_deref(), &ctx.env)?;
-    let cfg = config::load_config(&paths)?;
+    let profile_flag = ctx.global.profile.is_some();
+    if profile_flag && ctx.global.base_url.is_none() && ctx.env.base_url.is_some() {
+        ctx.reporter.warn(&format!(
+            "APLAUT_BASE_URL не используется: при явном --profile {profile} берётся base URL профиля"
+        ));
+    }
+    let mut load_profile = || -> Result<_, CliError> {
+        let config = config::load_config(&Paths::resolve(&ctx.env)?)?;
+        Ok(config.profiles.get(&profile).cloned())
+    };
     let base_url = auth::resolve_base_url(
         ctx.global.base_url.as_deref(),
         &ctx.env,
-        cfg.profiles.get(&profile),
+        profile_flag,
+        &mut load_profile,
     )?;
     if base_url != DEFAULT_BASE_URL {
         ctx.reporter.debug(&format!("base URL: {base_url}"));
