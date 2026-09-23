@@ -2,6 +2,8 @@
 
 pub mod cli;
 pub mod error;
+pub mod fsutil;
+pub mod secret;
 pub mod term;
 
 use clap::Parser;
