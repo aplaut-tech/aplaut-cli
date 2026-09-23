@@ -255,6 +255,18 @@ mod tests {
     }
 
     #[test]
+    fn observed_401_without_error_param_is_still_auth_error() {
+        // Так стейджинг отвечает на строку, не похожую на токен (2026-09-23).
+        let h = ResponseHeaders {
+            www_authenticate: Some(r#"Token realm="Aplaut Platform API v4""#.into()),
+            ..headers()
+        };
+        let err = from_response(401, &h, b"HTTP Token: Access denied.\n", &ctx());
+        assert_eq!((err.code.as_str(), err.exit), ("unauthorized", Exit::Auth));
+        assert_eq!(err.request_id.as_deref(), Some("req-42"));
+    }
+
+    #[test]
     fn www_authenticate_quoted_commas() {
         let (e, d) = parse_www_authenticate(r#"Bearer realm="x", error="invalid_token", error_description="expired, sorry""#);
         assert_eq!((e.as_deref(), d.as_deref()), (Some("invalid_token"), Some("expired, sorry")));
