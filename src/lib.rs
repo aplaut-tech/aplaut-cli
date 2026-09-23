@@ -1,6 +1,8 @@
 //! aplaut — консольный клиент Aplaut Platform API.
 
 pub mod cli;
+pub mod error;
+pub mod term;
 
 use clap::Parser;
 
