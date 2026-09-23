@@ -396,7 +396,7 @@ pub enum AuthVerb {
 #[derive(Debug, Clone, Args)]
 pub struct DryRun {
     /// Всё проверить и показать, что будет сделано, ничего не меняя
-    #[arg(long)]
+    #[arg(short = 'n', long)]
     pub dry_run: bool,
 }
 
