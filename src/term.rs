@@ -7,6 +7,8 @@ use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
+use serde::Serialize;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TermEnv {
     pub no_color: bool,
@@ -29,11 +31,22 @@ pub fn color_enabled(stderr_tty: bool, flag_no_color: bool, env: &TermEnv) -> bo
     stderr_tty && !flag_no_color && !env.no_color && !env.term_dumb && !env.aplaut_no_color
 }
 
+/// Предупреждение с кодом: в `--json` оно попадает в `warnings` конверта — агент реагирует на
+/// код, а не разбирает текст (спека agent mode §4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Warning {
+    pub code: String,
+    pub message: String,
+}
+
 pub struct Reporter {
     quiet: bool,
     verbose: bool,
     stderr_tty: bool,
     color: bool,
+    /// `--json`: stderr — только конверт; предупреждения копятся для него, info и прогресс молчат.
+    json: bool,
+    warnings: RefCell<Vec<Warning>>,
     progress_shown: Cell<bool>,
     out: RefCell<Box<dyn Write>>,
 }
@@ -55,16 +68,30 @@ impl Reporter {
             verbose,
             stderr_tty,
             color,
+            json: false,
+            warnings: RefCell::new(Vec::new()),
             progress_shown: Cell::new(false),
             out: RefCell::new(out),
         }
+    }
+
+    pub fn with_json(mut self, json: bool) -> Self {
+        self.json = json;
+        self
     }
 
     pub fn is_verbose(&self) -> bool {
         self.verbose
     }
 
-    pub fn warn(&self, msg: &str) {
+    pub fn warn(&self, code: &str, msg: &str) {
+        if self.json {
+            self.warnings.borrow_mut().push(Warning {
+                code: code.to_string(),
+                message: msg.to_string(),
+            });
+            return;
+        }
         self.clear_progress();
         let text = if self.color {
             format!("\x1b[33m{msg}\x1b[0m")
@@ -75,7 +102,7 @@ impl Reporter {
     }
 
     pub fn info(&self, msg: &str) {
-        if self.quiet {
+        if self.quiet || self.json {
             return;
         }
         self.clear_progress();
@@ -92,11 +119,16 @@ impl Reporter {
 
     /// Строка прогресса перерисовывается на месте; без TTY её нет совсем (clig: no animations).
     pub fn progress(&self, msg: &str) {
-        if self.quiet || !self.stderr_tty {
+        if self.quiet || self.json || !self.stderr_tty {
             return;
         }
         self.write(&format!("\r{msg}\x1b[K"));
         self.progress_shown.set(true);
+    }
+
+    /// Предупреждения, накопленные в `--json`, — для конверта.
+    pub fn take_warnings(&self) -> Vec<Warning> {
+        self.warnings.take()
     }
 
     pub fn clear_progress(&self) {
@@ -149,8 +181,27 @@ mod tests {
     fn quiet_hides_info_but_not_warnings() {
         let (r, buf) = captured(true, false, false);
         r.info("итог");
-        r.warn("фильтр не задан");
+        r.warn("default_filter", "фильтр не задан");
         assert_eq!(buf.contents(), "фильтр не задан\n");
+    }
+
+    #[test]
+    fn json_mode_collects_coded_warnings_and_silences_info_and_progress() {
+        let buf = SharedBuf::default();
+        let r =
+            Reporter::with_writer(false, false, true, false, Box::new(buf.clone())).with_json(true);
+        r.info("итог");
+        r.progress("reviews: 100");
+        r.warn("default_filter", "фильтр не задан");
+        assert_eq!(buf.contents(), "", "в --json stderr — только конверт");
+        assert_eq!(
+            r.take_warnings(),
+            vec![Warning {
+                code: "default_filter".into(),
+                message: "фильтр не задан".into()
+            }]
+        );
+        assert!(r.take_warnings().is_empty(), "забираются один раз");
     }
 
     #[test]

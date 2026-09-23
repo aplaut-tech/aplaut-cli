@@ -111,10 +111,13 @@ pub fn parse_config(text: &str, path: &Path) -> Result<ConfigFile, CliError> {
 
 pub fn load_credentials(paths: &Paths, reporter: &Reporter) -> Result<CredentialsFile, CliError> {
     if fsutil::is_group_or_world_accessible(&paths.credentials).unwrap_or(false) {
-        reporter.warn(&format!(
-            "файл {0} доступен другим пользователям; выполните: chmod 600 {0}",
-            paths.credentials.display()
-        ));
+        reporter.warn(
+            "credentials_permissions",
+            &format!(
+                "файл {0} доступен другим пользователям; выполните: chmod 600 {0}",
+                paths.credentials.display()
+            ),
+        );
     }
     load_toml(&paths.credentials, true)
         .map_err(|message| CliError::general("credentials_invalid", message))

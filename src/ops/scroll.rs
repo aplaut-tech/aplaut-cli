@@ -104,7 +104,10 @@ pub fn run(
             state.total_count = page.meta.total_count;
             state.applied_filter = page.meta.applied_filter.clone();
             if let Some(applied) = &page.meta.applied_filter {
-                reporter.warn(&default_filter_warning(job.records_type, applied));
+                reporter.warn(
+                    "default_filter",
+                    &default_filter_warning(job.records_type, applied),
+                );
             }
         }
         if page.meta.has_more && page.meta.cursor.is_none() {

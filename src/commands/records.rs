@@ -41,6 +41,7 @@ fn scroll_records(resource: &Resource, args: &ScrollArgs, ctx: &Ctx) -> Result<(
             .is_some_and(|f| !f.iter().any(|c| c == "id"))
     {
         ctx.reporter.warn(
+            "fields_without_id",
             "в --fields нет id: после сбоя записи на границе страницы придут повторно, а без id их не убрать",
         );
     }
@@ -143,9 +144,12 @@ fn connect(ctx: &Ctx) -> Result<ApiClient, CliError> {
     let profile = auth::active_profile(ctx.global.profile.as_deref(), &ctx.env)?;
     let profile_flag = ctx.global.profile.is_some();
     if profile_flag && ctx.global.base_url.is_none() && ctx.env.base_url.is_some() {
-        ctx.reporter.warn(&format!(
-            "APLAUT_BASE_URL не используется: при явном --profile {profile} берётся base URL профиля"
-        ));
+        ctx.reporter.warn(
+            "base_url_env_ignored",
+            &format!(
+                "APLAUT_BASE_URL не используется: при явном --profile {profile} берётся base URL профиля"
+            ),
+        );
     }
     let mut load_profile = || -> Result<_, CliError> {
         let config = config::load_config(&Paths::resolve(&ctx.env)?)?;

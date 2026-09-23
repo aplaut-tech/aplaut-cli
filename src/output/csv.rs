@@ -73,10 +73,13 @@ impl CsvSink {
             .collect();
         if !lists.is_empty() {
             self.warned_to_many = true;
-            self.reporter.warn(&format!(
+            self.reporter.warn(
+                "csv_to_many",
+                &format!(
                 "связи «{}» — списки; в CSV они не разворачиваются (объекты есть в --format jsonl)",
                 lists.join(", ")
-            ));
+            ),
+            );
         }
     }
 }
@@ -107,9 +110,10 @@ impl RecordSink for CsvSink {
             for name in tabular::absent(schema, &rows) {
                 if !self.warned_absent.iter().any(|w| w == name) {
                     self.warned_absent.push(name.to_string());
-                    self.reporter.warn(&format!(
-                        "колонки «{name}» из --fields в данных нет — в CSV она пустая"
-                    ));
+                    self.reporter.warn(
+                        "field_absent",
+                        &format!("колонки «{name}» из --fields в данных нет — в CSV она пустая"),
+                    );
                 }
             }
             for row in &rows {
@@ -120,6 +124,7 @@ impl RecordSink for CsvSink {
                 {
                     self.warned_new_columns = true;
                     self.reporter.warn(
+                        "csv_new_columns",
                         "в данных появились поля, которых не было на первой странице; в CSV они не попадут (есть в --format jsonl)",
                     );
                 }
