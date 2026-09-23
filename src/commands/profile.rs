@@ -2,7 +2,7 @@
 //! (скрытый ввод или stdin) — здесь он никогда не печатается и не редактируется.
 
 use std::collections::BTreeSet;
-use std::io::{self, BufRead, IsTerminal, Write};
+use std::io::{self, BufRead, Write};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -31,7 +31,7 @@ pub fn run(verb: ProfileVerb, ctx: &Ctx) -> Result<(), CliError> {
         ProfileVerb::List(args) => list(&args.format, ctx),
         ProfileVerb::Get { name, format } => get(&name, &format.format, ctx),
         ProfileVerb::Set { name, description } => set(&name, description.as_deref(), ctx),
-        ProfileVerb::Delete { name, force } => delete(&name, force, ctx),
+        ProfileVerb::Delete { name, yes } => delete(&name, yes, ctx),
         ProfileVerb::Edit => edit(ctx),
     }
 }
@@ -378,14 +378,14 @@ fn validate_description(text: &str) -> Result<String, CliError> {
     Ok(text.to_string())
 }
 
-fn delete(name: &str, force: bool, ctx: &Ctx) -> Result<(), CliError> {
+fn delete(name: &str, yes: bool, ctx: &Ctx) -> Result<(), CliError> {
     auth::validate_profile_name(name)?;
     let (paths, mut cfg, mut creds) = load(ctx)?;
     if !cfg.profiles.contains_key(name) && !creds.profiles.contains_key(name) {
         return Err(not_found(name, &views(&cfg, &creds, "")));
     }
     let with_token = creds.profiles.contains_key(name);
-    if !force {
+    if !yes {
         let question = format!(
             "Удалить профиль «{name}»{}? [y/N] ",
             if with_token {
@@ -408,7 +408,7 @@ fn delete(name: &str, force: bool, ctx: &Ctx) -> Result<(), CliError> {
 }
 
 fn edit(ctx: &Ctx) -> Result<(), CliError> {
-    if ctx.global.no_input || !io::stdin().is_terminal() {
+    if !ctx.can_prompt() {
         return Err(CliError::usage(
             "terminal_required",
             "profile edit открывает редактор и работает только в терминале",
@@ -435,16 +435,15 @@ fn edit(ctx: &Ctx) -> Result<(), CliError> {
     Ok(())
 }
 
-/// clig: в терминале — вопрос, без терминала — только явный `--force` (у агента нет TTY).
+/// clig: в терминале — вопрос; без терминала, с --no-input и --json — только явный `--yes`.
 fn confirm(ctx: &Ctx, question: &str) -> Result<bool, CliError> {
-    let stdin = io::stdin();
-    if ctx.global.no_input || !stdin.is_terminal() {
+    if !ctx.can_prompt() {
         return Err(CliError::new(
             Exit::Policy,
             "confirmation_required",
             "удаление профиля требует подтверждения",
         )
-        .with_hint("повторите с --force"));
+        .with_hint("повторите с --yes"));
     }
     Ok(ask_yes(question, false))
 }

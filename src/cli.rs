@@ -100,6 +100,9 @@ pub struct GlobalArgs {
     /// Никогда не спрашивать ввод
     #[arg(long, global = true)]
     pub no_input: bool,
+    /// Итог и ошибки — одной строкой JSON (форма — в --help команды); включает --no-input
+    #[arg(long, global = true)]
+    pub json: bool,
     /// Без цвета
     #[arg(long, global = true)]
     pub no_color: bool,
@@ -203,9 +206,9 @@ pub enum ProfileVerb {
     Delete {
         /// Имя профиля
         name: String,
-        /// Не спрашивать подтверждение (обязательно без терминала)
-        #[arg(short, long)]
-        force: bool,
+        /// Не спрашивать подтверждение (без терминала, с --no-input и --json — обязательно)
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
     /// Открыть файл профилей (config.toml) в $VISUAL / $EDITOR
     Edit,

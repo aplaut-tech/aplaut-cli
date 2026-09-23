@@ -235,7 +235,7 @@ fn get_shows_one_profile_and_unknown_is_not_found() {
 }
 
 #[test]
-fn delete_needs_force_without_terminal_and_removes_token_and_config() {
+fn delete_needs_yes_without_terminal_and_removes_token_and_config() {
     let home = TempDir::new("profile-delete");
     login(home.path(), "ci", "tok-ci");
     assert_eq!(
@@ -254,18 +254,24 @@ fn delete_needs_force_without_terminal_and_removes_token_and_config() {
         refused.error_json()["error"]["code"],
         "confirmation_required"
     );
-    let deleted = aplaut(
+    assert!(refused.error_json()["error"]["hint"]
+        .as_str()
+        .unwrap()
+        .contains("--yes"));
+    let old_flag = aplaut(
         home.path(),
         &["profile", "delete", "ci", "--force"],
         &[],
         "",
     );
+    assert_eq!(old_flag.code, 2, "--force заменён на --yes");
+    let deleted = aplaut(home.path(), &["profile", "delete", "ci", "--yes"], &[], "");
     assert_eq!(deleted.code, 0, "{}", deleted.stderr);
     assert!(!config_body(home.path()).contains("ci"));
     let creds = fs::read_to_string(home.path().join("config/aplaut/credentials")).unwrap();
     assert!(!creds.contains("tok-ci"));
     assert_eq!(
-        aplaut(home.path(), &["profile", "delete", "ci", "-f"], &[], "").code,
+        aplaut(home.path(), &["profile", "delete", "ci", "-y"], &[], "").code,
         5
     );
 }

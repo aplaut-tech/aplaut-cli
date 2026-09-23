@@ -71,10 +71,10 @@ fn read_token(ctx: &Ctx) -> Result<Secret, CliError> {
             resolve::read_token_file(path)
         };
     }
-    // Никогда не требуем промпт (clig): без TTY или с --no-input — только флаги.
-    if !is_terminal || ctx.global.no_input {
+    // Никогда не требуем промпт (clig): без TTY, с --no-input или --json — только флаги.
+    if !ctx.can_prompt() {
         return Err(CliError::usage("token_required", "нужен токен").with_hint(
-            "передайте его через --token-stdin или --token-file; ввод с клавиатуры доступен только в терминале",
+            "передайте его через --token-stdin или --token-file; ввод с клавиатуры — только в терминале без --no-input и --json",
         ));
     }
     let raw = rpassword::prompt_password("Токен Platform API (ввод скрыт): ")
