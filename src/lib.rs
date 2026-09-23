@@ -9,6 +9,8 @@ pub mod error;
 pub mod filter;
 pub mod fsutil;
 pub mod http;
+pub mod output;
+pub mod page;
 pub mod secret;
 pub mod spec;
 pub mod term;

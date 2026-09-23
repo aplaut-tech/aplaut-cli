@@ -1,0 +1,233 @@
+{
+ "data": [
+  {
+   "id": "0000000000000000aa000001",
+   "type": "reviews",
+   "attributes": {
+    "author_ip": null,
+    "context_type": "product",
+    "external_id": "ext-1",
+    "rating": 5.0,
+    "body": "Текст body 1\nвторая строка, с \"кавычками\"",
+    "wordless": false,
+    "pros": "Текст pros 1\nвторая строка, с \"кавычками\"",
+    "cons": "Текст cons 1\nвторая строка, с \"кавычками\"",
+    "rating_details": [],
+    "author_details": [],
+    "dimensions": [],
+    "created_at": "2014-01-20T00:00:00.000+04:00",
+    "updated_at": "2021-03-11T12:31:31.561+03:00",
+    "published_at": null,
+    "imported_at": "2021-05-28T15:09:35.659+03:00",
+    "author_name": "Автор 1",
+    "author_email": "author1@example.com",
+    "author_phone": null,
+    "author_external_id": null,
+    "author_avatar_url": "https://example.com/author_avatar_url/1",
+    "origin": "platform_api",
+    "syndication_source": null,
+    "state": "waiting",
+    "product_id": "ext-1",
+    "photos": [],
+    "videos": [],
+    "tags": [],
+    "recommended": null,
+    "custom_attributes": {},
+    "location_name": null,
+    "likes": 1,
+    "dislikes": 1,
+    "helpfulness": 1,
+    "order_number": null,
+    "custom_source": null,
+    "custom_medium": null,
+    "custom_campaign": null,
+    "verified": false,
+    "content_hash": "00000000000000000000000000000001",
+    "context_hash": "00000000000000000000000000000001",
+    "location": {},
+    "hide_my_data": false,
+    "featured": false,
+    "product_name": "Товар 1"
+   },
+   "relationships": {
+    "author": {
+     "data": {
+      "id": "0000000000000000aa000002",
+      "type": "consumers"
+     }
+    },
+    "product": {
+     "data": {
+      "id": "0000000000000000aa000003",
+      "type": "products"
+     }
+    },
+    "comments": {
+     "data": []
+    },
+    "state_changes": {
+     "data": []
+    }
+   }
+  },
+  {
+   "id": "0000000000000000aa000004",
+   "type": "reviews",
+   "attributes": {
+    "author_ip": null,
+    "context_type": "product",
+    "external_id": null,
+    "rating": 5.0,
+    "body": null,
+    "wordless": false,
+    "pros": "Текст pros 2\nвторая строка, с \"кавычками\"",
+    "cons": null,
+    "rating_details": [],
+    "author_details": [],
+    "dimensions": [],
+    "created_at": "2026-06-18T15:11:07.144+03:00",
+    "updated_at": "2026-09-09T16:35:29.946+03:00",
+    "published_at": "2026-06-24T15:03:14.261+03:00",
+    "imported_at": "2026-06-18T15:11:07.109+03:00",
+    "author_name": "Автор 2",
+    "author_email": "",
+    "author_phone": "",
+    "author_external_id": null,
+    "author_avatar_url": null,
+    "origin": "widgets_2",
+    "syndication_source": null,
+    "state": "published",
+    "product_id": "ext-2",
+    "photos": [],
+    "videos": [
+     "https://example.com/videos/2.jpg"
+    ],
+    "tags": [],
+    "recommended": true,
+    "custom_attributes": {
+     "region": 66,
+     "source": "fixture"
+    },
+    "location_name": "",
+    "likes": 2,
+    "dislikes": 2,
+    "helpfulness": 2,
+    "order_number": null,
+    "custom_source": null,
+    "custom_medium": null,
+    "custom_campaign": null,
+    "verified": false,
+    "content_hash": "00000000000000000000000000000002",
+    "context_hash": "00000000000000000000000000000002",
+    "location": {
+     "client_ip": "192.0.2.10"
+    },
+    "hide_my_data": false,
+    "featured": false,
+    "product_name": "Товар 2"
+   },
+   "relationships": {
+    "author": {
+     "data": null
+    },
+    "product": {
+     "data": {
+      "id": "0000000000000000aa000005",
+      "type": "products"
+     }
+    },
+    "comments": {
+     "data": [
+      {
+       "id": "0000000000000000aa000006",
+       "type": "comments"
+      }
+     ]
+    },
+    "state_changes": {
+     "data": [
+      {
+       "id": "0000000000000000aa000007",
+       "type": "state_changes"
+      },
+      {
+       "id": "0000000000000000aa000008",
+       "type": "state_changes"
+      }
+     ]
+    }
+   }
+  }
+ ],
+ "included": [
+  {
+   "id": "0000000000000000aa000002",
+   "type": "consumers",
+   "attributes": {
+    "email": "author1@example.com",
+    "phone": null,
+    "name": "Автор 1",
+    "first_name": null,
+    "custom_attributes": {},
+    "avatar_url": "https://example.com/avatar_url/1",
+    "external_id": null,
+    "created_at": "2024-02-07T17:35:35.394+03:00",
+    "updated_at": "2024-02-07T17:35:35.394+03:00",
+    "unsubscribed": false,
+    "permanent_failed": false,
+    "complained": false
+   }
+  },
+  {
+   "id": "0000000000000000aa000003",
+   "type": "products",
+   "attributes": {
+    "name": "Товар 1",
+    "url": "https://example.com/url/1",
+    "external_id": "ext-1",
+    "alias": null,
+    "group_id": null,
+    "category_name": "category_name 1",
+    "brand_name": "brand_name 1",
+    "description": null,
+    "picture_urls": [
+     "https://example.com/picture_urls/1.jpg"
+    ],
+    "price": 0.0,
+    "available": true,
+    "recommended_product_ids": null,
+    "custom_attributes": {},
+    "reviews_count": 0,
+    "questions_count": 0,
+    "published_group_reviews_count": 0,
+    "published_group_questions_count": 0,
+    "rating": 0.0,
+    "rating_details": [],
+    "recommended": null,
+    "created_at": "2021-03-05T16:01:43.017+03:00",
+    "updated_at": "2024-11-26T17:55:46.587+03:00",
+    "published_photos_count": 0,
+    "published_kinescope_assets_count": 0,
+    "published_mux_assets_count": 0,
+    "published_group_photos_count": 0,
+    "published_group_kinescope_assets_count": 0,
+    "published_group_mux_assets_count": 0,
+    "summary_updated_at": null
+   },
+   "relationships": {
+    "reviews_summary_item": {
+     "data": null
+    }
+   }
+  }
+ ],
+ "links": {
+  "next": "http://127.0.0.1/v4/scroll/reviews?cursor=fixture-cursor-1"
+ },
+ "meta": {
+  "has_more": true,
+  "count": 2,
+  "cursor": "fixture-cursor-1",
+  "total_count": 744
+ }
+}
