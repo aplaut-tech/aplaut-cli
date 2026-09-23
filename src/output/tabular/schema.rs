@@ -56,7 +56,7 @@ impl Schema {
     }
 }
 
-fn infer_type<'a>(values: impl Iterator<Item = &'a Value>) -> LogicalType {
+pub(super) fn infer_type<'a>(values: impl Iterator<Item = &'a Value>) -> LogicalType {
     let mut found: Option<LogicalType> = None;
     for value in values {
         let ty = match value {

@@ -61,6 +61,7 @@ fn params(filter: Option<&str>) -> ScrollParams {
         sort: "updated_at:asc".into(),
         include: vec![],
         per_page: 2,
+        fields: None,
     }
 }
 
@@ -75,6 +76,7 @@ fn run(
         format,
         Box::new(out.clone()),
         &job.params.include,
+        job.params.fields.clone(),
         h.reporter.clone(),
     );
     let mut client = api(h, max_retries);
@@ -194,6 +196,42 @@ fn resumes_from_state_and_drops_repeated_tail() {
     assert_eq!(h.server.requests()[0].query_keys(), vec!["cursor"]);
     let after = state::load(&path).unwrap().unwrap();
     assert!(after.completed && after.cursor.is_none());
+}
+
+/// Первая страница продолжения уже получена, а курсор не повторить: отвергнуть её из-за имени
+/// в --fields значило бы оставить стейт с in_flight. Поэтому — предупреждение и пустая колонка.
+#[test]
+fn resumed_csv_walk_warns_about_unknown_fields_instead_of_wedging_the_state() {
+    let dir = TempDir::new("resume-fields");
+    let path = dir.path().join("state.json");
+    let fields = Some(vec!["id".to_string(), "raiting".to_string()]);
+    let mut saved = ScrollState::new(
+        "reviews",
+        ScrollParams {
+            fields: fields.clone(),
+            ..params(Some(FILTER))
+        },
+    );
+    saved.cursor = Some("c1".into());
+    saved.last_page_ids = vec!["r1".into()];
+    saved.emitted = 1;
+    state::save(&path, &mut saved, 0).unwrap();
+    let h = harness(vec![Reply::json(
+        200,
+        page_json(&[review("r2", "t2")], None, false),
+    )]);
+    let mut resumed = job(Some(FILTER), Some(&path));
+    resumed.params.fields = fields;
+    let (result, out) = run(&h, Format::Csv, &resumed, 0);
+    result.unwrap();
+    assert!(out.lines().any(|l| l == "r2,"), "{out}");
+    assert!(
+        h.log.contents().contains("«raiting»"),
+        "{}",
+        h.log.contents()
+    );
+    let after = state::load(&path).unwrap().unwrap();
+    assert!(after.completed && !after.in_flight);
 }
 
 #[test]

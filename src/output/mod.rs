@@ -27,6 +27,11 @@ pub enum Format {
 impl Format {
     pub const NAMES: [&'static str; 3] = ["raw", "jsonl", "csv"];
 
+    /// Табличные форматы строятся на общей проекции (`tabular`) и понимают `--fields`.
+    pub fn is_tabular(self) -> bool {
+        matches!(self, Format::Csv)
+    }
+
     pub fn from_name(name: &str) -> Option<Format> {
         match name {
             "raw" => Some(Format::Raw),
@@ -56,18 +61,22 @@ pub trait RecordSink {
     /// `seen` — id записей предыдущей страницы: после паузы > 2 мин сервер повторяет её хвост.
     fn write_page(&mut self, page: &Page, seen: &HashSet<String>) -> Result<PageReport, CliError>;
     fn finish(&mut self) -> Result<Commit, CliError>;
+    /// Обход продолжается по сохранённому стейту: первая страница запуска — продолжение, её уже
+    /// не перезапросить (курсор не идемпотентен), поэтому отвергать её формату поздно.
+    fn resumed(&mut self) {}
 }
 
 pub fn make_sink(
     format: Format,
     out: Box<dyn Write>,
     include: &[String],
+    fields: Option<Vec<String>>,
     reporter: Rc<Reporter>,
 ) -> Box<dyn RecordSink> {
     match format {
         Format::Raw => Box::new(raw::RawSink::new(out)),
         Format::Jsonl => Box::new(jsonl::JsonlSink::new(out)),
-        Format::Csv => Box::new(csv::CsvSink::new(out, include.to_vec(), reporter)),
+        Format::Csv => Box::new(csv::CsvSink::new(out, include.to_vec(), fields, reporter)),
     }
 }
 

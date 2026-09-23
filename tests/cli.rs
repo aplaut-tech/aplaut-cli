@@ -239,6 +239,197 @@ fn csv_format_writes_header_and_rows() {
     assert_eq!(lines.len(), 3);
 }
 
+fn two_reviews() -> MockServer {
+    MockServer::start(vec![Reply::json(
+        200,
+        first_page_json(
+            &[review("r1", "t1"), review("r2", "t2")],
+            None,
+            false,
+            2,
+            None,
+        ),
+    )])
+}
+
+#[test]
+fn csv_fields_select_and_order_columns() {
+    let home = TempDir::new("csv-fields");
+    let server = two_reviews();
+    let url = server.base_url();
+    let out = aplaut(
+        home.path(),
+        &scroll(
+            "reviews",
+            &url,
+            &["--format", "csv", "--fields", "rating,id,product_ref"],
+        ),
+        &[("APLAUT_ACCESS_TOKEN", "tok")],
+        "",
+    );
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    assert_eq!(
+        out.stdout,
+        "rating,id,product_ref\n5.0,r1,p-r1\n5.0,r2,p-r2\n"
+    );
+    assert!(
+        server.requests()[0].query_param("fields").is_none(),
+        "параметра fields в API нет"
+    );
+}
+
+#[test]
+fn fields_typo_is_a_usage_error_with_empty_stdout() {
+    let home = TempDir::new("csv-fields-typo");
+    let server = two_reviews();
+    let url = server.base_url();
+    let state = home.path().join("reviews.state.json");
+    let out = aplaut(
+        home.path(),
+        &scroll(
+            "reviews",
+            &url,
+            &[
+                "--format",
+                "csv",
+                "--fields",
+                "id,raiting",
+                "--state",
+                state.to_str().unwrap(),
+            ],
+        ),
+        &[("APLAUT_ACCESS_TOKEN", "tok")],
+        "",
+    );
+    assert_eq!(out.code, 2, "{}", out.stderr);
+    let err = out.error_json();
+    assert_eq!(err["error"]["code"], "unknown_field");
+    assert_eq!(err["error"]["field"], "fields");
+    assert!(!state.exists(), "ответ на открытие не записан — стейта нет");
+    assert!(err["error"]["hint"]
+        .as_str()
+        .unwrap()
+        .starts_with("может, rating?"));
+    assert_eq!(out.stdout, "");
+}
+
+#[test]
+fn fields_need_csv_and_their_includes_before_any_request() {
+    let home = TempDir::new("csv-fields-local");
+    let server = MockServer::start(vec![]);
+    let url = server.base_url();
+    for (extra, code) in [
+        (&["--fields", "id,rating"][..], "fields_need_tabular_format"),
+        (
+            &["--format", "jsonl", "--fields", "id"][..],
+            "fields_need_tabular_format",
+        ),
+        (
+            &["--format", "csv", "--fields", "id,product.name"][..],
+            "field_needs_include",
+        ),
+        (
+            &["--format", "csv", "--fields", "id,,rating"][..],
+            "invalid_fields",
+        ),
+        (
+            &["--format", "csv", "--fields", "id,rating,id"][..],
+            "duplicate_field",
+        ),
+    ] {
+        let out = aplaut(
+            home.path(),
+            &scroll("reviews", &url, extra),
+            &[("APLAUT_ACCESS_TOKEN", "tok")],
+            "",
+        );
+        assert_eq!(out.code, 2, "{extra:?}: {}", out.stderr);
+        assert_eq!(out.error_json()["error"]["code"], code, "{extra:?}");
+    }
+    assert!(server.requests().is_empty(), "квота открытий не потрачена");
+}
+
+/// Колонки проверены на первой странице обхода; другой список при продолжении склеил бы CSV
+/// с разной раскладкой.
+#[test]
+fn resume_with_other_fields_is_rejected_before_any_request() {
+    let home = TempDir::new("csv-fields-resume");
+    let server = MockServer::start(vec![Reply::json(
+        200,
+        first_page_json(&[review("r1", "t1")], Some("c1"), true, 2, None),
+    )]);
+    let url = server.base_url();
+    let state = home.path().join("reviews.state.json");
+    let state = state.to_str().unwrap();
+    let run = |fields: &str| {
+        aplaut(
+            home.path(),
+            &scroll(
+                "reviews",
+                &url,
+                &[
+                    "--format",
+                    "csv",
+                    "--fields",
+                    fields,
+                    "--state",
+                    state,
+                    "--max-records",
+                    "1",
+                ],
+            ),
+            &[("APLAUT_ACCESS_TOKEN", "tok")],
+            "",
+        )
+    };
+    let first = run("id,rating");
+    assert_eq!(first.code, 0, "{}", first.stderr);
+    let other = run("body,id");
+    assert_eq!(other.code, 2, "{}", other.stderr);
+    let err = other.error_json();
+    assert_eq!(err["error"]["code"], "state_mismatch");
+    assert!(
+        err["error"]["message"].as_str().unwrap().contains("fields"),
+        "{err}"
+    );
+    assert_eq!(server.requests().len(), 1, "второй запуск не ходил в API");
+}
+
+#[test]
+fn fields_without_id_warn_that_duplicates_cannot_be_removed() {
+    let home = TempDir::new("csv-fields-no-id");
+    let url_of = |server: &MockServer| server.base_url();
+    // Без --state повторов между запусками нет — и предупреждать не о чем.
+    let plain = two_reviews();
+    let out = aplaut(
+        home.path(),
+        &scroll(
+            "reviews",
+            &url_of(&plain),
+            &["--format", "csv", "--fields", "rating"],
+        ),
+        &[("APLAUT_ACCESS_TOKEN", "tok")],
+        "",
+    );
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    assert!(!out.stderr.contains("нет id"), "{}", out.stderr);
+    let server = two_reviews();
+    let state = home.path().join("reviews.state.json");
+    let state = state.to_str().unwrap();
+    let out = aplaut(
+        home.path(),
+        &scroll(
+            "reviews",
+            &url_of(&server),
+            &["--format", "csv", "--fields", "rating", "--state", state],
+        ),
+        &[("APLAUT_ACCESS_TOKEN", "tok")],
+        "",
+    );
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    assert!(out.stderr.contains("нет id"), "{}", out.stderr);
+}
+
 #[test]
 fn partial_failure_exits_4_with_flushed_stdout() {
     let home = TempDir::new("partial");

@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use serde_json::Value;
 
-use super::tabular::{project, Schema};
+use super::tabular::{self, project, Row, Schema};
 use super::{is_duplicate, write_error, Commit, PageReport, RecordSink};
 use crate::error::CliError;
 use crate::page::{IncludedIndex, Page};
@@ -17,22 +17,43 @@ use crate::term::Reporter;
 pub struct CsvSink {
     out: Box<dyn Write>,
     include: Vec<String>,
+    /// `--fields`: колонки и их порядок; без него — все поля первой страницы.
+    fields: Option<Vec<String>>,
     reporter: Rc<Reporter>,
     /// Фиксируется по первой странице: заголовок CSV нельзя поменять на ходу.
     schema: Option<Schema>,
+    /// Имена из `--fields` строго проверяются только на ответе на открытие обхода: его можно
+    /// запросить заново, а продолжение — нет (курсор не идемпотентен).
+    strict: bool,
+    warned_absent: Vec<String>,
     warned_new_columns: bool,
     warned_to_many: bool,
 }
 
 impl CsvSink {
-    pub fn new(out: Box<dyn Write>, include: Vec<String>, reporter: Rc<Reporter>) -> Self {
+    pub fn new(
+        out: Box<dyn Write>,
+        include: Vec<String>,
+        fields: Option<Vec<String>>,
+        reporter: Rc<Reporter>,
+    ) -> Self {
         CsvSink {
             out,
             include,
+            fields,
             reporter,
             schema: None,
+            strict: true,
+            warned_absent: Vec::new(),
             warned_new_columns: false,
             warned_to_many: false,
+        }
+    }
+
+    fn schema_for(&self, rows: &[Row], strict: bool) -> Result<Schema, CliError> {
+        match &self.fields {
+            Some(fields) => tabular::select(fields, rows, strict),
+            None => Ok(Schema::infer(rows)),
         }
     }
 
@@ -62,6 +83,7 @@ impl CsvSink {
 
 impl RecordSink for CsvSink {
     fn write_page(&mut self, page: &Page, seen: &HashSet<String>) -> Result<PageReport, CliError> {
+        let strict = std::mem::replace(&mut self.strict, false);
         let index = IncludedIndex::new(&page.included);
         let mut rows = Vec::new();
         let mut duplicates = 0;
@@ -74,7 +96,7 @@ impl RecordSink for CsvSink {
             rows.push(project(record, &index, &self.include));
         }
         if self.schema.is_none() && !rows.is_empty() {
-            let schema = Schema::infer(&rows);
+            let schema = self.schema_for(&rows, strict)?;
             write_record(
                 self.out.as_mut(),
                 schema.columns.iter().map(|c| c.name.clone()),
@@ -82,8 +104,20 @@ impl RecordSink for CsvSink {
             self.schema = Some(schema);
         }
         if let Some(schema) = &self.schema {
+            for name in tabular::absent(schema, &rows) {
+                if !self.warned_absent.iter().any(|w| w == name) {
+                    self.warned_absent.push(name.to_string());
+                    self.reporter.warn(&format!(
+                        "колонки «{name}» из --fields в данных нет — в CSV она пустая"
+                    ));
+                }
+            }
             for row in &rows {
-                if !self.warned_new_columns && row.keys().any(|k| !schema.contains(k)) {
+                // С --fields колонки выбраны явно: новые поля в данных ничего не меняют.
+                if self.fields.is_none()
+                    && !self.warned_new_columns
+                    && row.keys().any(|k| !schema.contains(k))
+                {
                     self.warned_new_columns = true;
                     self.reporter.warn(
                         "в данных появились поля, которых не было на первой странице; в CSV они не попадут (есть в --format jsonl)",
@@ -104,9 +138,13 @@ impl RecordSink for CsvSink {
         })
     }
 
+    fn resumed(&mut self) {
+        self.strict = false;
+    }
+
     fn finish(&mut self) -> Result<Commit, CliError> {
         if self.schema.is_none() {
-            let schema = Schema::infer(&[]);
+            let schema = self.schema_for(&[], false)?;
             write_record(
                 self.out.as_mut(),
                 schema.columns.iter().map(|c| c.name.clone()),
@@ -160,6 +198,13 @@ mod tests {
     use crate::term::SharedBuf;
 
     fn sink(include: &[&str]) -> (CsvSink, SharedBuf, SharedBuf) {
+        sink_with_fields(include, None)
+    }
+
+    fn sink_with_fields(
+        include: &[&str],
+        fields: Option<&[&str]>,
+    ) -> (CsvSink, SharedBuf, SharedBuf) {
         let (out, log) = (SharedBuf::default(), SharedBuf::default());
         let reporter = Rc::new(Reporter::with_writer(
             false,
@@ -169,8 +214,9 @@ mod tests {
             Box::new(log.clone()),
         ));
         let include = include.iter().map(|s| s.to_string()).collect();
+        let fields = fields.map(|f| f.iter().map(|s| s.to_string()).collect());
         (
-            CsvSink::new(Box::new(out.clone()), include, reporter),
+            CsvSink::new(Box::new(out.clone()), include, fields, reporter),
             out,
             log,
         )
@@ -254,5 +300,70 @@ mod tests {
             "id,type,x\na,reviews,1\nb,reviews,2\nc,reviews,\n"
         );
         assert_eq!(log.contents().matches("появились поля").count(), 1);
+    }
+
+    #[test]
+    fn fields_fix_header_order_and_ignore_later_columns() {
+        let (mut s, out, log) =
+            sink_with_fields(&["author"], Some(&["rating", "id", "author.email"]));
+        s.write_page(&fixture_page(), &none_seen()).unwrap();
+        let later = br#"{"data":[{"id":"z","type":"reviews","attributes":{"rating":1,"new_field":1}}],"meta":{"has_more":false}}"#;
+        s.write_page(&Page::parse(later.to_vec()).unwrap(), &none_seen())
+            .unwrap();
+        s.finish().unwrap();
+        let rows = parse_csv(&out.contents());
+        assert_eq!(rows[0], ["rating", "id", "author.email"]);
+        assert_eq!(rows[1][2], "author1@example.com");
+        assert_eq!(rows[3], ["1", "z", ""], "поля нет у записи — пустая ячейка");
+        assert!(
+            !log.contents().contains("появились поля"),
+            "с --fields новые поля не важны: {}",
+            log.contents()
+        );
+    }
+
+    #[test]
+    fn fields_on_empty_export_are_the_header() {
+        let (mut s, out, _) = sink_with_fields(&[], Some(&["rating", "id"]));
+        s.finish().unwrap();
+        assert_eq!(out.contents(), "rating,id\n");
+    }
+
+    #[test]
+    fn unknown_field_is_reported_before_anything_is_written() {
+        let (mut s, out, _) = sink_with_fields(&[], Some(&["id", "raiting"]));
+        let err = s.write_page(&fixture_page(), &none_seen()).unwrap_err();
+        assert_eq!(err.code, "unknown_field");
+        assert_eq!(out.contents(), "", "ни заголовка, ни строк");
+    }
+
+    #[test]
+    fn resumed_sink_warns_once_instead_of_failing_on_unknown_names() {
+        let (mut s, out, log) = sink_with_fields(&[], Some(&["id", "raiting"]));
+        s.resumed();
+        s.write_page(&fixture_page(), &none_seen()).unwrap();
+        s.write_page(&fixture_page(), &none_seen()).unwrap();
+        assert!(
+            out.contents().starts_with("id,raiting\n"),
+            "{}",
+            out.contents()
+        );
+        assert_eq!(
+            log.contents().matches("«raiting»").count(),
+            1,
+            "{}",
+            log.contents()
+        );
+    }
+
+    #[test]
+    fn only_the_opening_page_is_checked_strictly() {
+        let (mut s, out, log) = sink_with_fields(&[], Some(&["id", "raiting"]));
+        let empty = br#"{"data":[],"meta":{"has_more":true,"cursor":"c1"}}"#;
+        s.write_page(&Page::parse(empty.to_vec()).unwrap(), &none_seen())
+            .unwrap();
+        s.write_page(&fixture_page(), &none_seen()).unwrap();
+        assert!(out.contents().starts_with("id,raiting\n"));
+        assert!(log.contents().contains("«raiting»"), "{}", log.contents());
     }
 }

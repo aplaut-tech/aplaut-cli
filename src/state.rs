@@ -21,6 +21,10 @@ pub struct ScrollParams {
     pub sort: String,
     pub include: Vec<String>,
     pub per_page: u32,
+    /// `--fields`: в API не уходит, но входит в стейт — продолжение пишет те же колонки, что
+    /// проверены на первой странице обхода; иначе склеенный CSV разъехался бы.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fields: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,6 +127,14 @@ impl ScrollState {
                 self.params.per_page, params.per_page
             ));
         }
+        if self.params.fields != params.fields {
+            let show = |v: &Option<Vec<String>>| v.as_ref().map_or("—".into(), |f| f.join(","));
+            diffs.push(format!(
+                "fields: в стейте «{}», передан «{}»",
+                show(&self.params.fields),
+                show(&params.fields)
+            ));
+        }
         if diffs.is_empty() {
             return Ok(());
         }
@@ -178,6 +190,7 @@ mod tests {
             sort: "updated_at:asc".into(),
             include: vec!["author".into()],
             per_page: 100,
+            fields: None,
         }
     }
 
@@ -267,5 +280,37 @@ mod tests {
                 .code,
             "state_version"
         );
+    }
+
+    #[test]
+    fn fields_are_part_of_the_state() {
+        let mut saved = ScrollState::new("reviews", params(None));
+        saved.params.fields = Some(vec!["id".into(), "rating".into()]);
+        let other = ScrollParams {
+            fields: Some(vec!["body".into(), "id".into()]),
+            ..params(None)
+        };
+        let err = saved
+            .check_matches("reviews", &other, Path::new("s.json"))
+            .unwrap_err();
+        assert_eq!(err.code, "state_mismatch");
+        assert!(
+            err.message
+                .contains("fields: в стейте «id,rating», передан «body,id»"),
+            "{}",
+            err.message
+        );
+        let none = saved
+            .check_matches("reviews", &params(None), Path::new("s.json"))
+            .unwrap_err();
+        assert!(none.message.contains("передан «—»"), "{}", none.message);
+    }
+
+    #[test]
+    fn state_without_fields_keeps_its_format() {
+        let json = serde_json::to_string(&ScrollState::new("reviews", params(None))).unwrap();
+        assert!(!json.contains("fields"), "{json}");
+        let back: ScrollState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.params.fields, None);
     }
 }

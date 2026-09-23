@@ -14,7 +14,7 @@ use crate::error::CliError;
 use crate::filter;
 use crate::http::{ApiClient, HttpSettings};
 use crate::ops::scroll::{self, ScrollJob, ScrollOutcome};
-use crate::output;
+use crate::output::{self, tabular};
 use crate::resources::Resource;
 use crate::spec::{self, ScrollSpec};
 use crate::state::ScrollParams;
@@ -34,9 +34,25 @@ fn scroll_records(resource: &Resource, args: &ScrollArgs, ctx: &Ctx) -> Result<(
     })?;
     // Сначала локальные проверки: ошибка в параметрах не должна тратить квоту открытий scroll.
     let params = scroll_params(args, spec)?;
+    if args.state.is_some()
+        && params
+            .fields
+            .as_ref()
+            .is_some_and(|f| !f.iter().any(|c| c == "id"))
+    {
+        ctx.reporter.warn(
+            "в --fields нет id: после сбоя записи на границе страницы придут повторно, а без id их не убрать",
+        );
+    }
     let mut api = connect(ctx)?;
     let out: Box<dyn Write> = Box::new(BufWriter::new(io::stdout().lock()));
-    let mut sink = output::make_sink(args.format, out, &params.include, ctx.reporter.clone());
+    let mut sink = output::make_sink(
+        args.format,
+        out,
+        &params.include,
+        params.fields.clone(),
+        ctx.reporter.clone(),
+    );
     let job = ScrollJob {
         records_type: resource.records_type,
         params,
@@ -79,12 +95,30 @@ pub fn scroll_params(args: &ScrollArgs, spec: &ScrollSpec) -> Result<ScrollParam
                 .with_field("max_records"),
         );
     }
+    let fields = output_fields(args, &include)?;
     Ok(ScrollParams {
         filter: args.filter.clone(),
         sort,
         include,
         per_page,
+        fields,
     })
+}
+
+/// `--fields` — только для табличных форматов: `raw` отдаёт тело ответа как есть, `jsonl` — документ.
+fn output_fields(args: &ScrollArgs, include: &[String]) -> Result<Option<Vec<String>>, CliError> {
+    let Some(list) = &args.fields else {
+        return Ok(None);
+    };
+    if !args.format.is_tabular() {
+        return Err(CliError::usage(
+            "fields_need_tabular_format",
+            "--fields выбирает колонки табличного вывода и работает только с --format csv",
+        )
+        .with_field("fields")
+        .with_hint("добавьте --format csv или уберите --fields"));
+    }
+    tabular::parse_fields(list, include).map(Some)
 }
 
 fn connect(ctx: &Ctx) -> Result<ApiClient, CliError> {

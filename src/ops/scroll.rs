@@ -64,6 +64,9 @@ pub fn run(
     if state.completed {
         return Ok(outcome);
     }
+    if loaded {
+        sink.resumed();
+    }
     let path = format!("/scroll/{}", job.records_type);
     let mut stale_pages = 0;
     loop {

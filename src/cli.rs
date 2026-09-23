@@ -39,6 +39,9 @@ const SCROLL_AFTER_LONG_HELP: &str = "\
   # Просмотр в таблице:
   aplaut products scroll --format csv --max-records 500 | tw
 
+  # Только нужные колонки CSV и в заданном порядке (<связь>.<атрибут> — из --include):
+  aplaut reviews scroll --filter updated_at:gte:2024-01-01T00:00:00Z --include product --format csv --fields id,rating,body,product.name
+
   # Выгрузка с продолжением после сбоя (cron): повторный запуск той же команды продолжит с места остановки.
   aplaut reviews scroll --filter updated_at:gte:2024-01-01T00:00:00Z --state reviews.state.json --format jsonl >> reviews.jsonl
 
@@ -172,6 +175,9 @@ pub struct ScrollArgs {
     /// Формат вывода
     #[arg(long, value_name = "FORMAT", default_value = "raw", value_parser = format_parser())]
     pub format: Format,
+    /// Колонки CSV (только --format csv) через запятую, в заданном порядке: id,rating,body; <связь>_ref — id связи, <связь>.<атрибут> — поле объекта из --include
+    #[arg(long, value_name = "COL,…")]
+    pub fields: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
