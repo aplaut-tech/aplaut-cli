@@ -256,3 +256,97 @@ fn parse_error_with_json_is_an_envelope() {
         (Some("aplaut"), Some("usage"))
     );
 }
+
+/// Все файлы каталога конфигурации: имя → байты.
+fn snapshot(home: &Path) -> Vec<(String, Vec<u8>)> {
+    let dir = home.join("config/aplaut");
+    let mut files: Vec<(String, Vec<u8>)> = std::fs::read_dir(&dir)
+        .map(|d| {
+            d.filter_map(|e| e.ok())
+                .map(|e| {
+                    (
+                        e.file_name().to_string_lossy().into_owned(),
+                        std::fs::read(e.path()).unwrap(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    files
+}
+
+#[test]
+fn dry_run_returns_the_plan_and_changes_nothing() {
+    let home = TempDir::new("agent-dry");
+    login(home.path(), "ci");
+    let before = snapshot(home.path());
+    for (args, command, stdin) in [
+        (
+            vec!["profile", "set", "ci", "--base-url", "https://x.example/v4"],
+            "profile.set",
+            "",
+        ),
+        (vec!["profile", "delete", "ci"], "profile.delete", ""),
+        (
+            vec!["auth", "login", "--token-stdin", "--profile", "ci"],
+            "auth.login",
+            "tok-new",
+        ),
+        (vec!["auth", "logout", "--profile", "ci"], "auth.logout", ""),
+    ] {
+        let mut full = args.clone();
+        full.extend(["--dry-run", "--json"]);
+        let v = only_stdout(&aplaut(home.path(), &full, &[], stdin));
+        assert_eq!(
+            (v["command"].as_str(), v["dry_run"].as_bool()),
+            (Some(command), Some(true))
+        );
+        assert!(!v["result"].is_null(), "{command}: план — это result");
+        assert_eq!(snapshot(home.path()), before, "{command} ничего не изменил");
+    }
+}
+
+#[test]
+fn dry_run_in_an_empty_home_creates_nothing() {
+    let home = TempDir::new("agent-dry-empty");
+    let text = aplaut(
+        home.path(),
+        &[
+            "profile",
+            "set",
+            "x",
+            "--base-url",
+            "https://x.example/v4",
+            "--dry-run",
+        ],
+        &[],
+        "",
+    );
+    assert_eq!(text.code, 0, "{}", text.stderr);
+    assert!(
+        text.stderr
+            .starts_with("Пробный запуск, ничего не изменено:"),
+        "{}",
+        text.stderr
+    );
+    let login = aplaut(
+        home.path(),
+        &[
+            "auth",
+            "login",
+            "--token-stdin",
+            "--profile",
+            "x",
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+        "tok",
+    );
+    assert_eq!(only_stdout(&login)["result"]["token"], "***");
+    assert!(
+        !home.path().join("config").exists(),
+        "каталог конфигурации не создан"
+    );
+}

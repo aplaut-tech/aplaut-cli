@@ -199,6 +199,8 @@ pub enum ProfileVerb {
         /// Описание профиля для людей (`none` — убрать)
         #[arg(long, value_name = "TEXT|none")]
         description: Option<String>,
+        #[command(flatten)]
+        dry: DryRun,
     },
     /// Удалить профиль вместе с его токеном
     Delete {
@@ -207,6 +209,8 @@ pub enum ProfileVerb {
         /// Не спрашивать подтверждение (без терминала, с --no-input и --json — обязательно)
         #[arg(short = 'y', long)]
         yes: bool,
+        #[command(flatten)]
+        dry: DryRun,
     },
     /// Открыть файл профилей (config.toml) в $VISUAL / $EDITOR
     Edit,
@@ -215,9 +219,17 @@ pub enum ProfileVerb {
 #[derive(Debug, Subcommand)]
 pub enum AuthVerb {
     /// Сохранить токен в профиль (ввод скрыт; в скриптах — --token-stdin или --token-file)
-    Login,
+    Login(DryRun),
     /// Удалить токен профиля
-    Logout,
+    Logout(DryRun),
+}
+
+/// `--dry-run` у команд, которые что-то меняют (спека agent mode §5).
+#[derive(Debug, Clone, Args)]
+pub struct DryRun {
+    /// Всё проверить и показать, что будет сделано, ничего не меняя
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 /// `output` не зависит от clap: имена форматов проверяет clap, превращение — `Format::from_name`.

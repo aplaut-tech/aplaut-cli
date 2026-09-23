@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use super::{path_text, Ctx, Outcome};
+use super::{path_text, Ctx, Outcome, DRY_RUN_PREFIX};
 use crate::auth::{self, DEFAULT_BASE_URL};
 use crate::cli::ProfileVerb;
 use crate::config::{self, ConfigFile, CredentialsFile, Paths, ProfileConfig};
@@ -30,8 +30,12 @@ pub fn run(verb: ProfileVerb, ctx: &Ctx) -> Result<Outcome, CliError> {
     match verb {
         ProfileVerb::List => list(ctx),
         ProfileVerb::Get { name } => get(&name, ctx),
-        ProfileVerb::Set { name, description } => set(&name, description.as_deref(), ctx),
-        ProfileVerb::Delete { name, yes } => delete(&name, yes, ctx),
+        ProfileVerb::Set {
+            name,
+            description,
+            dry,
+        } => set(&name, description.as_deref(), dry.dry_run, ctx),
+        ProfileVerb::Delete { name, yes, dry } => delete(&name, yes, dry.dry_run, ctx),
         ProfileVerb::Edit => edit(ctx),
     }
 }
@@ -359,7 +363,12 @@ fn field_changes(before: &ProfileConfig, after: &ProfileConfig) -> Vec<FieldChan
 
 /// Upsert, как `set` во всей грамматике: несуществующий профиль создаётся.
 /// `none` убирает значение (clig: специальное слово вместо пустой строки).
-fn set(name: &str, description: Option<&str>, ctx: &Ctx) -> Result<Outcome, CliError> {
+fn set(
+    name: &str,
+    description: Option<&str>,
+    dry_run: bool,
+    ctx: &Ctx,
+) -> Result<Outcome, CliError> {
     auth::validate_profile_name(name)?;
     let base_url = ctx.global.base_url.as_deref();
     if base_url.is_none() && description.is_none() {
@@ -395,14 +404,19 @@ fn set(name: &str, description: Option<&str>, ctx: &Ctx) -> Result<Outcome, CliE
         entry.base_url.as_deref().unwrap_or("прод по умолчанию"),
         entry.description.as_deref().unwrap_or("нет")
     );
-    config::save_config(&paths, &cfg)?;
-    ctx.reporter.info(&summary);
+    if dry_run {
+        ctx.reporter.info(&format!("{DRY_RUN_PREFIX} {summary}"));
+    } else {
+        config::save_config(&paths, &cfg)?;
+        ctx.reporter.info(&summary);
+    }
     Ok(Outcome::stdout(SetResult {
         profile: name.to_string(),
         created,
         changes,
         config_path: path_text(&paths.config),
-    }))
+    })
+    .with_dry_run(dry_run))
 }
 
 /// Описание — одна строка: оно выводится в `profile list` после имени.
@@ -425,7 +439,7 @@ struct DeleteResult {
     removed_token: bool,
 }
 
-fn delete(name: &str, yes: bool, ctx: &Ctx) -> Result<Outcome, CliError> {
+fn delete(name: &str, yes: bool, dry_run: bool, ctx: &Ctx) -> Result<Outcome, CliError> {
     auth::validate_profile_name(name)?;
     let (paths, mut cfg, mut creds) = load(ctx)?;
     let in_config = cfg.profiles.contains_key(name);
@@ -439,7 +453,19 @@ fn delete(name: &str, yes: bool, ctx: &Ctx) -> Result<Outcome, CliError> {
             removed_config: removed && in_config,
             removed_token: removed && with_token,
         })
+        .with_dry_run(dry_run)
     };
+    if dry_run {
+        let token = if with_token {
+            " вместе с токеном"
+        } else {
+            ""
+        };
+        ctx.reporter.info(&format!(
+            "{DRY_RUN_PREFIX} профиль «{name}» был бы удалён{token}."
+        ));
+        return Ok(result(true));
+    }
     if !yes {
         let question = format!(
             "Удалить профиль «{name}»{}? [y/N] ",

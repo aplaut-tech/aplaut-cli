@@ -5,7 +5,7 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use super::{path_text, Ctx, Outcome};
+use super::{path_text, Ctx, Outcome, DRY_RUN_PREFIX};
 use crate::auth::{self as resolve, StdinSource};
 use crate::cli::AuthVerb;
 use crate::config::{self, Paths, ProfileCredentials};
@@ -14,8 +14,8 @@ use crate::secret::{parse_token, Secret};
 
 pub fn run(verb: AuthVerb, ctx: &Ctx) -> Result<Outcome, CliError> {
     match verb {
-        AuthVerb::Login => login(ctx),
-        AuthVerb::Logout => logout(ctx),
+        AuthVerb::Login(dry) => login(ctx, dry.dry_run),
+        AuthVerb::Logout(dry) => logout(ctx, dry.dry_run),
     }
 }
 
@@ -38,7 +38,7 @@ struct LoginResult {
     credentials_path: String,
 }
 
-fn login(ctx: &Ctx) -> Result<Outcome, CliError> {
+fn login(ctx: &Ctx, dry_run: bool) -> Result<Outcome, CliError> {
     let profile = resolve::active_profile(ctx.global.profile.as_deref(), &ctx.env)?;
     let base_url = ctx
         .global
@@ -61,24 +61,37 @@ fn login(ctx: &Ctx) -> Result<Outcome, CliError> {
     if base_url.is_some() {
         entry.base_url = base_url.clone();
     }
-    config::save_credentials(&paths, &credentials)?;
-    config::save_config(&paths, &cfg)?;
-    ctx.reporter.info(&format!(
-        "Токен сохранён в профиль «{profile}» ({}).",
-        paths.credentials.display()
-    ));
-    if let Some(url) = base_url {
-        ctx.reporter.info(&format!("Base URL профиля: {url}"));
+    if dry_run {
+        let url = base_url
+            .as_deref()
+            .map(|u| format!(", base URL — {u}"))
+            .unwrap_or_default();
+        ctx.reporter.info(&format!(
+            "{DRY_RUN_PREFIX} токен был бы сохранён в профиль «{profile}» ({}){url}.",
+            paths.credentials.display()
+        ));
+    } else {
+        config::save_credentials(&paths, &credentials)?;
+        config::save_config(&paths, &cfg)?;
+        ctx.reporter.info(&format!(
+            "Токен сохранён в профиль «{profile}» ({}).",
+            paths.credentials.display()
+        ));
+        if let Some(url) = base_url {
+            ctx.reporter.info(&format!("Base URL профиля: {url}"));
+        }
+        ctx.reporter.info(
+            "Токен не проверялся на сервере: проверка появится вместе с `aplaut auth status`.",
+        );
     }
-    ctx.reporter
-        .info("Токен не проверялся на сервере: проверка появится вместе с `aplaut auth status`.");
     Ok(Outcome::stdout(LoginResult {
         profile,
         token: "***",
         token_source,
         replaced,
         credentials_path: path_text(&paths.credentials),
-    }))
+    })
+    .with_dry_run(dry_run))
 }
 
 fn read_token(ctx: &Ctx) -> Result<(Secret, TokenSource), CliError> {
@@ -110,7 +123,7 @@ fn read_token(ctx: &Ctx) -> Result<(Secret, TokenSource), CliError> {
     parse_token(&raw).map(|t| (t, TokenSource::Prompt))
 }
 
-fn logout(ctx: &Ctx) -> Result<Outcome, CliError> {
+fn logout(ctx: &Ctx, dry_run: bool) -> Result<Outcome, CliError> {
     let profile = resolve::active_profile(ctx.global.profile.as_deref(), &ctx.env)?;
     let paths = Paths::resolve(&ctx.env)?;
     let mut credentials = config::load_credentials(&paths, &ctx.reporter)?;
@@ -118,16 +131,25 @@ fn logout(ctx: &Ctx) -> Result<Outcome, CliError> {
         ctx.reporter.info(&format!(
             "В профиле «{profile}» нет сохранённого токена — удалять нечего."
         ));
-        return Ok(Outcome::stdout(
-            serde_json::json!({"profile": profile, "removed": false}),
+        return Ok(
+            Outcome::stdout(serde_json::json!({"profile": profile, "removed": false}))
+                .with_dry_run(dry_run),
+        );
+    }
+    if dry_run {
+        ctx.reporter.info(&format!(
+            "{DRY_RUN_PREFIX} токен профиля «{profile}» был бы удалён из {}.",
+            paths.credentials.display()
+        ));
+    } else {
+        config::save_credentials(&paths, &credentials)?;
+        ctx.reporter.info(&format!(
+            "Токен профиля «{profile}» удалён из {}.",
+            paths.credentials.display()
         ));
     }
-    config::save_credentials(&paths, &credentials)?;
-    ctx.reporter.info(&format!(
-        "Токен профиля «{profile}» удалён из {}.",
-        paths.credentials.display()
-    ));
-    Ok(Outcome::stdout(
-        serde_json::json!({"profile": profile, "removed": true}),
-    ))
+    Ok(
+        Outcome::stdout(serde_json::json!({"profile": profile, "removed": true}))
+            .with_dry_run(dry_run),
+    )
 }

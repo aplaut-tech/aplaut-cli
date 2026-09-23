@@ -24,6 +24,9 @@ pub struct Ctx {
     pub clock: Rc<dyn Clock>,
 }
 
+/// Текстовый итог под `--dry-run` начинается одинаково у всех команд (спека agent mode §5).
+pub const DRY_RUN_PREFIX: &str = "Пробный запуск, ничего не изменено:";
+
 /// Куда писать конверт `--json`: у scroll stdout занят данными.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Channel {
@@ -109,8 +112,8 @@ pub fn command_name(command: &Command) -> String {
         Command::Auth { verb } => (
             "auth",
             match verb {
-                AuthVerb::Login => "login",
-                AuthVerb::Logout => "logout",
+                AuthVerb::Login(_) => "login",
+                AuthVerb::Logout(_) => "logout",
             },
         ),
         Command::Profile { verb } => (
