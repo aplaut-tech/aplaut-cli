@@ -38,11 +38,10 @@ pub fn run() -> u8 {
     let env = auth::EnvSnapshot::capture();
     let args: Vec<OsString> = std::env::args_os().collect();
     let stderr_tty = io::stderr().is_terminal();
-    // `--no-color` нужен до разбора: от него зависит, раскрасит ли clap справку и ошибки;
-    // `--json` и `--dry-run` — форма конверта, если разбор не удался.
+    // До разбора нужны `--no-color` (раскрасит ли clap справку и ошибки) и `--json`
+    // (ошибка разбора — конвертом и в терминале).
     let no_color_flag = args.iter().any(|a| a == "--no-color");
     let json_flag = args.iter().any(|a| a == "--json");
-    let dry_run_flag = args.iter().any(|a| a == "--dry-run");
     let color = term::color_enabled(stderr_tty, no_color_flag, &env.term);
     let mut command = cli::Cli::command();
     if !color {
@@ -56,6 +55,7 @@ pub fn run() -> u8 {
         Err(err) => return clap_error(err, stderr_tty && !json_flag),
     };
     let name = commands::command_name(&cli.command);
+    let dry_run = commands::is_dry_run(&cli.command);
     let json = cli.global.json;
     let reporter = Rc::new(
         term::Reporter::new(cli.global.quiet, cli.global.verbose, stderr_tty, color)
@@ -94,7 +94,7 @@ pub fn run() -> u8 {
             } else {
                 format!(
                     "{}\n",
-                    envelope::failure(&err, &name, dry_run_flag, &reporter.take_warnings())
+                    envelope::failure(&err, &name, dry_run, &reporter.take_warnings())
                 )
             };
             let _ = io::stderr().write_all(text.as_bytes());

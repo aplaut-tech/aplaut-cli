@@ -350,3 +350,21 @@ fn dry_run_in_an_empty_home_creates_nothing() {
         "каталог конфигурации не создан"
     );
 }
+
+/// План или настоящий запуск — агент должен знать и тогда, когда команда упала; `-n` — то же,
+/// что `--dry-run`.
+#[test]
+fn failure_envelope_reports_dry_run_for_both_spellings() {
+    let home = TempDir::new("agent-dry-fail");
+    for (flag, expected) in [("-n", true), ("--dry-run", true), ("--yes", false)] {
+        let out = aplaut(
+            home.path(),
+            &["profile", "delete", "ghost", flag, "--json"],
+            &[],
+            "",
+        );
+        assert_eq!(out.code, 5, "{flag}: {}", out.stderr);
+        let v = envelope(out.stderr.lines().last().unwrap());
+        assert_eq!(v["dry_run"], expected, "{flag}");
+    }
+}

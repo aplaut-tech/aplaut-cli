@@ -168,7 +168,7 @@ aplaut reviews scroll --filter updated_at:gte:2024-01-01T00:00:00Z --include pro
 | `--json` | итог и ошибка — одной строкой JSON; предупреждения — в `warnings`, а не текстом; включает `--no-input` |
 | `--no-input` | ничего не спрашивать: вместо вопроса — ошибка с подсказкой, какой флаг передать |
 | `--yes` (`-y`) | подтвердить удаление без вопроса (`profile delete`) |
-| `--dry-run` | у `profile set/delete` и `auth login/logout`: всё проверить и вернуть план в `result`, ничего не меняя |
+| `--dry-run` (`-n`) | у `profile set/delete` и `auth login/logout`: всё проверить и вернуть план в `result`, ничего не меняя |
 
 ```json
 {"ok":true,"command":"profile.set","cli_version":"0.1.0","dry_run":false,
@@ -231,6 +231,7 @@ aplaut reviews scroll --filter updated_at:gte:2024-01-01T00:00:00Z --include pro
 | `cursor_mismatch` | 1 | курсор выдан для другого запроса |
 | `server_error` | 1 | 5xx; у 503 — `retry_after` |
 | `unexpected_redirect` | 1 | 3xx: редиректы не выполняются |
+| `http_<status>` | 1 | прочие ответы HTTP без своего кода, например `http_409` |
 | `timeout` | 1 | нет ответа за `--timeout` после повторов |
 | `network_error` | 1 | сеть или TLS после повторов |
 | `response_too_large` | 1 | ответ больше допустимого |

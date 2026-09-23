@@ -67,6 +67,10 @@ fn every_error_and_warning_code_is_documented_in_readme() {
         ]
         .map(String::from),
     );
+    // Прочие статусы HTTP — `http_<status>` через format!: в README это одна строка каталога.
+    if texts.iter().any(|t| t.contains("format!(\"http_{")) {
+        codes.push("http_<status>".into());
+    }
     codes.sort();
     codes.dedup();
     assert!(codes.len() > 40, "сканер сломался: {codes:?}");

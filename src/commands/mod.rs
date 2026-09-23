@@ -103,6 +103,20 @@ pub fn dispatch(command: Command, ctx: &Ctx) -> Result<Outcome, CliError> {
     }
 }
 
+/// Запуск с `--dry-run` (`-n`) — для конверта ошибки: агент должен знать, что упал план, а не
+/// настоящий запуск.
+pub fn is_dry_run(command: &Command) -> bool {
+    match command {
+        Command::Profile {
+            verb: ProfileVerb::Set { dry, .. } | ProfileVerb::Delete { dry, .. },
+        } => dry.dry_run,
+        Command::Auth {
+            verb: AuthVerb::Login(dry) | AuthVerb::Logout(dry),
+        } => dry.dry_run,
+        _ => false,
+    }
+}
+
 /// Имя для конверта ошибки: `reviews.scroll`, `auth.login`.
 pub fn command_name(command: &Command) -> String {
     let (resource, verb) = match command {
