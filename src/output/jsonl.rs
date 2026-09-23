@@ -35,7 +35,11 @@ impl RecordSink for JsonlSink {
             written += 1;
         }
         self.out.flush().map_err(write_error)?;
-        Ok(PageReport { written, duplicates, commit: Commit::Durable })
+        Ok(PageReport {
+            written,
+            duplicates,
+            commit: Commit::Durable,
+        })
     }
 
     fn finish(&mut self) -> Result<Commit, CliError> {
@@ -50,7 +54,9 @@ pub fn resolve_relationships(record: &Value, index: &IncludedIndex) -> Value {
     if let Some(relationships) = out.get_mut("relationships").and_then(Value::as_object_mut) {
         for relationship in relationships.values_mut() {
             match relationship.get_mut("data") {
-                Some(Value::Array(items)) => items.iter_mut().for_each(|item| resolve_ref(item, index)),
+                Some(Value::Array(items)) => {
+                    items.iter_mut().for_each(|item| resolve_ref(item, index))
+                }
                 Some(item @ Value::Object(_)) => resolve_ref(item, index),
                 _ => {}
             }
@@ -79,7 +85,10 @@ mod tests {
     use crate::term::SharedBuf;
 
     fn lines(buf: &SharedBuf) -> Vec<Value> {
-        buf.contents().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+        buf.contents()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect()
     }
 
     #[test]
@@ -92,7 +101,10 @@ mod tests {
         let author = &records[0]["relationships"]["author"]["data"];
         assert_eq!(author["type"], "consumers");
         assert_eq!(author["attributes"]["email"], "author1@example.com");
-        assert_eq!(records[0]["relationships"]["product"]["data"]["attributes"]["name"], "Товар 1");
+        assert_eq!(
+            records[0]["relationships"]["product"]["data"]["attributes"]["name"],
+            "Товар 1"
+        );
         assert!(records[1]["relationships"]["author"]["data"].is_null());
         let comment = &records[1]["relationships"]["comments"]["data"][0];
         assert!(comment.get("attributes").is_none() && comment["type"] == "comments");

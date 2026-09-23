@@ -27,7 +27,10 @@ pub fn run(resource: &'static Resource, verb: RecordsVerb, ctx: &Ctx) -> Result<
 
 fn scroll_records(resource: &Resource, args: &ScrollArgs, ctx: &Ctx) -> Result<(), CliError> {
     let spec = spec::scroll_spec(resource.records_type).ok_or_else(|| {
-        CliError::general("internal", format!("в спеке нет scroll для {}", resource.records_type))
+        CliError::general(
+            "internal",
+            format!("в спеке нет scroll для {}", resource.records_type),
+        )
     })?;
     // Сначала локальные проверки: ошибка в параметрах не должна тратить квоту открытий scroll.
     let params = scroll_params(args, spec)?;
@@ -40,7 +43,13 @@ fn scroll_records(resource: &Resource, args: &ScrollArgs, ctx: &Ctx) -> Result<(
         state_path: args.state.as_deref(),
         max_records: args.max_records,
     };
-    let outcome = scroll::run(&mut api, sink.as_mut(), &job, &ctx.reporter, ctx.clock.as_ref())?;
+    let outcome = scroll::run(
+        &mut api,
+        sink.as_mut(),
+        &job,
+        &ctx.reporter,
+        ctx.clock.as_ref(),
+    )?;
     summarize(resource.name, &outcome, args.state.as_deref(), ctx);
     Ok(())
 }
@@ -53,15 +62,29 @@ pub fn scroll_params(args: &ScrollArgs, spec: &ScrollSpec) -> Result<ScrollParam
         Some(list) => filter::parse_include(list, spec.includes)?,
         None => Vec::new(),
     };
-    let sort = args.sort.clone().unwrap_or_else(|| spec::SCROLL_SORT_DEFAULT.to_string());
+    let sort = args
+        .sort
+        .clone()
+        .unwrap_or_else(|| spec::SCROLL_SORT_DEFAULT.to_string());
     filter::check_sort(&sort, spec::SCROLL_SORTS)?;
     let per_page = args.per_page.unwrap_or(spec::SCROLL_PER_PAGE_DEFAULT);
-    filter::check_per_page(per_page, spec::SCROLL_PER_PAGE_MIN, spec::SCROLL_PER_PAGE_MAX)?;
+    filter::check_per_page(
+        per_page,
+        spec::SCROLL_PER_PAGE_MIN,
+        spec::SCROLL_PER_PAGE_MAX,
+    )?;
     if args.max_records == Some(0) {
-        return Err(CliError::usage("invalid_max_records", "--max-records должно быть больше 0")
-            .with_field("max_records"));
+        return Err(
+            CliError::usage("invalid_max_records", "--max-records должно быть больше 0")
+                .with_field("max_records"),
+        );
     }
-    Ok(ScrollParams { filter: args.filter.clone(), sort, include, per_page })
+    Ok(ScrollParams {
+        filter: args.filter.clone(),
+        sort,
+        include,
+        per_page,
+    })
 }
 
 fn connect(ctx: &Ctx) -> Result<ApiClient, CliError> {
@@ -75,22 +98,39 @@ fn connect(ctx: &Ctx) -> Result<ApiClient, CliError> {
     let stdin = io::stdin();
     let is_terminal = stdin.is_terminal();
     let mut lock = stdin.lock();
-    let mut source = StdinSource { is_terminal, reader: &mut lock };
+    let mut source = StdinSource {
+        is_terminal,
+        reader: &mut lock,
+    };
     let (token, token_source) = auth::resolve_token(&flags, &ctx.env, &credentials, &mut source)?;
     let profile = auth::active_profile(ctx.global.profile.as_deref(), &ctx.env)?;
     let cfg = config::load_config(&paths)?;
-    let base_url = auth::resolve_base_url(ctx.global.base_url.as_deref(), &ctx.env, cfg.profiles.get(&profile))?;
+    let base_url = auth::resolve_base_url(
+        ctx.global.base_url.as_deref(),
+        &ctx.env,
+        cfg.profiles.get(&profile),
+    )?;
     if base_url != DEFAULT_BASE_URL {
         ctx.reporter.debug(&format!("base URL: {base_url}"));
     }
-    ctx.reporter.debug(&format!("токен из {}", token_source.describe()));
+    ctx.reporter
+        .debug(&format!("токен из {}", token_source.describe()));
     let settings = HttpSettings {
         base_url: base_url.clone(),
         timeout: Duration::from_secs(ctx.global.timeout),
         max_retries: ctx.global.max_retries,
     };
-    let error_context = ErrorContext { token_source: token_source.describe(), base_url };
-    Ok(ApiClient::new(settings, token, error_context, ctx.clock.clone(), ctx.reporter.clone()))
+    let error_context = ErrorContext {
+        token_source: token_source.describe(),
+        base_url,
+    };
+    Ok(ApiClient::new(
+        settings,
+        token,
+        error_context,
+        ctx.clock.clone(),
+        ctx.reporter.clone(),
+    ))
 }
 
 /// clig: после работы — коротко, что произошло и что делать дальше.
@@ -102,9 +142,15 @@ fn summarize(name: &str, outcome: &ScrollOutcome, state: Option<&Path>, ctx: &Ct
         ));
         return;
     }
-    let mut line = format!("{name}: записей {}, страниц {}", outcome.emitted, outcome.pages);
+    let mut line = format!(
+        "{name}: записей {}, страниц {}",
+        outcome.emitted, outcome.pages
+    );
     if outcome.duplicates > 0 {
-        line.push_str(&format!(", повторов с прошлой страницы {}", outcome.duplicates));
+        line.push_str(&format!(
+            ", повторов с прошлой страницы {}",
+            outcome.duplicates
+        ));
     }
     line.push_str(match (outcome.completed, state) {
         (true, _) => "; обход завершён",

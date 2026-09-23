@@ -75,7 +75,11 @@ pub fn make_sink(
 /// код 4, а стейт не сдвигается дальше отданного.
 pub fn write_error(err: io::Error) -> CliError {
     if err.kind() == io::ErrorKind::BrokenPipe {
-        CliError::new(Exit::Partial, "output_closed", "получатель закрыл поток вывода")
+        CliError::new(
+            Exit::Partial,
+            "output_closed",
+            "получатель закрыл поток вывода",
+        )
     } else {
         CliError::io("запись в stdout", &err)
     }
@@ -92,7 +96,8 @@ pub(crate) mod test_util {
     use crate::page::Page;
 
     pub fn fixture_page() -> Page {
-        Page::parse(include_bytes!("../../tests/fixtures/reviews_page_include.json").to_vec()).unwrap()
+        Page::parse(include_bytes!("../../tests/fixtures/reviews_page_include.json").to_vec())
+            .unwrap()
     }
 
     pub fn none_seen() -> HashSet<String> {

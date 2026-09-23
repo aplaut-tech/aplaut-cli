@@ -34,8 +34,14 @@ pub type Row = BTreeMap<ColumnKey, Value>;
 /// `include` — связи, запрошенные через `--include`: только их to-one объекты разворачиваются в колонки.
 pub fn project(record: &Value, index: &IncludedIndex, include: &[String]) -> Row {
     let mut row = Row::new();
-    row.insert(ColumnKey::Id, record.get("id").cloned().unwrap_or(Value::Null));
-    row.insert(ColumnKey::Type, record.get("type").cloned().unwrap_or(Value::Null));
+    row.insert(
+        ColumnKey::Id,
+        record.get("id").cloned().unwrap_or(Value::Null),
+    );
+    row.insert(
+        ColumnKey::Type,
+        record.get("type").cloned().unwrap_or(Value::Null),
+    );
     if let Some(attributes) = record.get("attributes").and_then(Value::as_object) {
         for (name, value) in attributes {
             row.insert(ColumnKey::Attribute(name.clone()), value.clone());
@@ -48,20 +54,31 @@ pub fn project(record: &Value, index: &IncludedIndex, include: &[String]) -> Row
         let data = relationship.get("data").unwrap_or(&Value::Null);
         let reference = match data {
             Value::Object(_) => data.get("id").cloned().unwrap_or(Value::Null),
-            Value::Array(items) => Value::Array(items.iter().filter_map(|i| i.get("id").cloned()).collect()),
+            Value::Array(items) => {
+                Value::Array(items.iter().filter_map(|i| i.get("id").cloned()).collect())
+            }
             _ => Value::Null,
         };
         row.insert(ColumnKey::Ref(name.clone()), reference);
         if !include.iter().any(|i| i == name) {
             continue;
         }
-        let included = match (data.get("type").and_then(Value::as_str), data.get("id").and_then(Value::as_str)) {
+        let included = match (
+            data.get("type").and_then(Value::as_str),
+            data.get("id").and_then(Value::as_str),
+        ) {
             (Some(kind), Some(id)) => index.get(kind, id),
             _ => None,
         };
-        if let Some(attributes) = included.and_then(|o| o.get("attributes")).and_then(Value::as_object) {
+        if let Some(attributes) = included
+            .and_then(|o| o.get("attributes"))
+            .and_then(Value::as_object)
+        {
             for (attr, value) in attributes {
-                row.insert(ColumnKey::Included(name.clone(), attr.clone()), value.clone());
+                row.insert(
+                    ColumnKey::Included(name.clone(), attr.clone()),
+                    value.clone(),
+                );
             }
         }
     }
@@ -81,14 +98,26 @@ mod tests {
         let names: Vec<String> = row.keys().map(ColumnKey::name).collect();
         assert_eq!(&names[..2], ["id", "type"]);
         assert!(names.contains(&"product_name".to_string()));
-        assert_eq!(row[&ColumnKey::Ref("author".into())], "0000000000000000aa000002");
-        assert_eq!(row[&ColumnKey::Included("author".into(), "email".into())], "author1@example.com");
-        assert!(!row.contains_key(&ColumnKey::Included("product".into(), "name".into())), "product не запрошен");
+        assert_eq!(
+            row[&ColumnKey::Ref("author".into())],
+            "0000000000000000aa000002"
+        );
+        assert_eq!(
+            row[&ColumnKey::Included("author".into(), "email".into())],
+            "author1@example.com"
+        );
+        assert!(
+            !row.contains_key(&ColumnKey::Included("product".into(), "name".into())),
+            "product не запрошен"
+        );
         let second = project(&page.data[1], &index, &["author".to_string()]);
         assert!(second[&ColumnKey::Ref("author".into())].is_null());
         assert!(second[&ColumnKey::Ref("comments".into())].is_array());
         let first_ref = names.iter().position(|n| n.ends_with("_ref")).unwrap();
         let first_inc = names.iter().position(|n| n.contains('.')).unwrap();
-        assert!(names.iter().position(|n| n == "verified").unwrap() < first_ref && first_ref < first_inc);
+        assert!(
+            names.iter().position(|n| n == "verified").unwrap() < first_ref
+                && first_ref < first_inc
+        );
     }
 }

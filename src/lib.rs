@@ -1,5 +1,9 @@
 //! aplaut — консольный клиент Aplaut Platform API.
 
+// `CliError` намеренно плоский (поля читают рендер и тесты): ошибка — редкий путь CLI,
+// лишнее копирование ничтожно рядом с сетевым I/O, а `Box` усложнил бы доступ к полям.
+#![allow(clippy::result_large_err)]
+
 pub mod api_error;
 pub mod auth;
 pub mod cli;
@@ -48,7 +52,12 @@ pub fn run() -> u8 {
         Err(err) => return clap_error(err, stderr_tty),
     };
     let name = commands::command_name(&cli.command);
-    let reporter = Rc::new(term::Reporter::new(cli.global.quiet, cli.global.verbose, stderr_tty, color));
+    let reporter = Rc::new(term::Reporter::new(
+        cli.global.quiet,
+        cli.global.verbose,
+        stderr_tty,
+        color,
+    ));
     let ctx = commands::Ctx {
         global: cli.global,
         env,

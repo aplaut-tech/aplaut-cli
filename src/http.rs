@@ -96,13 +96,20 @@ impl ApiClient {
         }
     }
 
-    pub fn get(&mut self, path: &str, query: &[(&str, &str)], pace: Pace) -> Result<ApiResponse, CliError> {
+    pub fn get(
+        &mut self,
+        path: &str,
+        query: &[(&str, &str)],
+        pace: Pace,
+    ) -> Result<ApiResponse, CliError> {
         let url = format!("{}{}", self.settings.base_url, path);
         let mut attempt = 0u32;
         loop {
             self.throttle(pace);
-            self.reporter.debug(&format!("→ GET {}", describe(&url, query)));
-            self.reporter.debug(&format!("  Authorization: Bearer {MASK}, Accept: {ACCEPT}"));
+            self.reporter
+                .debug(&format!("→ GET {}", describe(&url, query)));
+            self.reporter
+                .debug(&format!("  Authorization: Bearer {MASK}, Accept: {ACCEPT}"));
             let started = self.clock.elapsed();
             let delay = match self.send(&url, query) {
                 Ok(resp) => {
@@ -111,14 +118,26 @@ impl ApiClient {
                         resp.status,
                         self.clock.elapsed().saturating_sub(started).as_millis(),
                         resp.body.len(),
-                        resp.headers.request_id.as_deref().map(|id| format!(", request id {id}")).unwrap_or_default()
+                        resp.headers
+                            .request_id
+                            .as_deref()
+                            .map(|id| format!(", request id {id}"))
+                            .unwrap_or_default()
                     ));
                     if (200..300).contains(&resp.status) {
-                        return Ok(ApiResponse { status: resp.status, body: resp.body, request_id: resp.headers.request_id });
+                        return Ok(ApiResponse {
+                            status: resp.status,
+                            body: resp.body,
+                            request_id: resp.headers.request_id,
+                        });
                     }
                     match self.retry_delay(&resp, attempt) {
                         Some(delay) if attempt < self.settings.max_retries => {
-                            self.note_retry(&format!("сервер ответил {}", resp.status), delay, attempt);
+                            self.note_retry(
+                                &format!("сервер ответил {}", resp.status),
+                                delay,
+                                attempt,
+                            );
                             delay
                         }
                         _ => return Err(self.api_error(&resp)),
@@ -152,7 +171,11 @@ impl ApiClient {
         let status = response.status().as_u16();
         let headers = {
             let h = response.headers();
-            let get = |name: &str| h.get(name).and_then(|v| v.to_str().ok()).map(str::to_string);
+            let get = |name: &str| {
+                h.get(name)
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string)
+            };
             ResponseHeaders {
                 request_id: get("x-request-id"),
                 retry_after: get("retry-after"),
@@ -162,8 +185,16 @@ impl ApiClient {
                 location: get("location"),
             }
         };
-        let body = response.body_mut().with_config().limit(MAX_BODY_BYTES).read_to_vec()?;
-        Ok(RawResponse { status, headers, body })
+        let body = response
+            .body_mut()
+            .with_config()
+            .limit(MAX_BODY_BYTES)
+            .read_to_vec()?;
+        Ok(RawResponse {
+            status,
+            headers,
+            body,
+        })
     }
 
     fn throttle(&mut self, pace: Pace) {
@@ -191,7 +222,9 @@ impl ApiClient {
         match resp.status {
             429 => {
                 let delay = match rate_limit_delay(&resp.headers, self.clock.unix_millis()) {
-                    Some(d) => d + Duration::from_millis(self.jitter.below(RATE_LIMIT_JITTER_MS + 1)),
+                    Some(d) => {
+                        d + Duration::from_millis(self.jitter.below(RATE_LIMIT_JITTER_MS + 1))
+                    }
                     None => backoff(attempt, &mut self.jitter),
                 };
                 (delay <= MAX_RATE_LIMIT_WAIT).then_some(delay)
@@ -218,7 +251,8 @@ impl ApiClient {
     }
 
     fn api_error(&self, resp: &RawResponse) -> CliError {
-        let mut err = api_error::from_response(resp.status, &resp.headers, &resp.body, &self.error_context);
+        let mut err =
+            api_error::from_response(resp.status, &resp.headers, &resp.body, &self.error_context);
         err.message = self.token.redact(&err.message);
         err.hint = err.hint.map(|h| self.token.redact(&h));
         err
@@ -235,8 +269,11 @@ impl ApiClient {
             _ => ("network_error", false),
         };
         let text = self.token.redact(&err.to_string());
-        CliError::general(code, format!("запрос к {} не выполнен: {text}", self.settings.base_url))
-            .retryable(retryable)
+        CliError::general(
+            code,
+            format!("запрос к {} не выполнен: {text}", self.settings.base_url),
+        )
+        .retryable(retryable)
     }
 }
 
@@ -244,7 +281,11 @@ impl ApiClient {
 /// локальными: расхождение часов не должно превращаться в лишние 429 или долгий сон.
 pub fn rate_limit_delay(headers: &ResponseHeaders, local_now_ms: i64) -> Option<Duration> {
     let retry_after = headers.retry_after.as_deref().and_then(parse_retry_after);
-    let server_now = headers.date.as_deref().and_then(time::parse_http_date).unwrap_or(local_now_ms);
+    let server_now = headers
+        .date
+        .as_deref()
+        .and_then(time::parse_http_date)
+        .unwrap_or(local_now_ms);
     let until_reset = headers
         .rate_limit_reset
         .as_deref()
@@ -262,7 +303,9 @@ fn parse_retry_after(value: &str) -> Option<Duration> {
 
 /// Полный джиттер (AWS): равномерно в [0, min(потолок, база·2^n)], но не меньше 100 мс.
 fn backoff(attempt: u32, jitter: &mut Jitter) -> Duration {
-    let ceiling = BACKOFF_BASE.saturating_mul(1u32 << attempt.min(16)).min(BACKOFF_CAP);
+    let ceiling = BACKOFF_BASE
+        .saturating_mul(1u32 << attempt.min(16))
+        .min(BACKOFF_CAP);
     Duration::from_millis(jitter.below(ceiling.as_millis() as u64 + 1)).max(BACKOFF_FLOOR)
 }
 
@@ -316,7 +359,10 @@ mod tests {
             ..ResponseHeaders::default()
         };
         // Локальные часы убежали на час вперёд — на результат это не влияет.
-        assert_eq!(rate_limit_delay(&h, 1_790_158_269_000 + 3_600_000), Some(Duration::from_secs(1)));
+        assert_eq!(
+            rate_limit_delay(&h, 1_790_158_269_000 + 3_600_000),
+            Some(Duration::from_secs(1))
+        );
         assert_eq!(rate_limit_delay(&ResponseHeaders::default(), 0), None);
     }
 

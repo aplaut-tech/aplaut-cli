@@ -69,7 +69,8 @@ pub fn parse_include(list: &str, allowed: &[&str]) -> Result<Vec<String>, CliErr
     for item in list.split(',').map(str::trim) {
         if item.is_empty() {
             return Err(
-                CliError::usage("invalid_include", "пустой элемент в --include").with_field("include")
+                CliError::usage("invalid_include", "пустой элемент в --include")
+                    .with_field("include"),
             );
         }
         if !allowed.contains(&item) {
@@ -91,11 +92,12 @@ pub fn check_sort(sort: &str, allowed: &[&str]) -> Result<(), CliError> {
     if allowed.contains(&sort) {
         return Ok(());
     }
-    Err(
-        CliError::usage("invalid_sort", format!("сортировка «{sort}» не поддерживается"))
-            .with_field("sort")
-            .with_hint(format!("допустимые значения: {}", allowed.join(", "))),
+    Err(CliError::usage(
+        "invalid_sort",
+        format!("сортировка «{sort}» не поддерживается"),
     )
+    .with_field("sort")
+    .with_hint(format!("допустимые значения: {}", allowed.join(", "))))
 }
 
 pub fn check_per_page(per_page: u32, min: u32, max: u32) -> Result<(), CliError> {
@@ -161,7 +163,11 @@ mod tests {
         let clauses = parse_filter("updated_at:gte:2020-01-01T00:00:00Z").unwrap();
         assert_eq!(
             clauses,
-            vec![Clause { param: "updated_at".into(), op: Op::Gte, values: vec!["2020-01-01T00:00:00Z".into()] }]
+            vec![Clause {
+                param: "updated_at".into(),
+                op: Op::Gte,
+                values: vec!["2020-01-01T00:00:00Z".into()]
+            }]
         );
     }
 
@@ -175,7 +181,15 @@ mod tests {
 
     #[test]
     fn rejects_malformed_blocks() {
-        for bad in ["", "rating", "rating:gt", "rating:gt:", ":gt:3", "rating:like:3", "state:exists:yes"] {
+        for bad in [
+            "",
+            "rating",
+            "rating:gt",
+            "rating:gt:",
+            ":gt:3",
+            "rating:like:3",
+            "state:exists:yes",
+        ] {
             let err = parse_filter(bad).unwrap_err();
             assert_eq!(err.code, "invalid_filter", "{bad}");
             assert_eq!(err.field.as_deref(), Some("filter"));
@@ -199,7 +213,10 @@ mod tests {
     #[test]
     fn include_is_validated_and_deduplicated() {
         let allowed = &["author", "product"];
-        assert_eq!(parse_include("author, product,author", allowed).unwrap(), vec!["author", "product"]);
+        assert_eq!(
+            parse_include("author, product,author", allowed).unwrap(),
+            vec!["author", "product"]
+        );
         let err = parse_include("author,nope", allowed).unwrap_err();
         assert_eq!(err.code, "invalid_include");
         assert_eq!(err.field.as_deref(), Some("include"));
@@ -209,9 +226,17 @@ mod tests {
     #[test]
     fn sort_and_per_page_ranges() {
         assert!(check_sort("created_at:asc", &["updated_at:asc", "created_at:asc"]).is_ok());
-        assert_eq!(check_sort("rating:desc", &["updated_at:asc"]).unwrap_err().code, "invalid_sort");
+        assert_eq!(
+            check_sort("rating:desc", &["updated_at:asc"])
+                .unwrap_err()
+                .code,
+            "invalid_sort"
+        );
         assert!(check_per_page(100, 1, 100).is_ok());
-        assert_eq!(check_per_page(101, 1, 100).unwrap_err().field.as_deref(), Some("per_page"));
+        assert_eq!(
+            check_per_page(101, 1, 100).unwrap_err().field.as_deref(),
+            Some("per_page")
+        );
         assert!(check_per_page(0, 1, 100).is_err());
     }
 }

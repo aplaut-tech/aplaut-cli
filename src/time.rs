@@ -170,29 +170,60 @@ mod tests {
 
     #[test]
     fn rfc3339_with_offset_and_millis() {
-        assert_eq!(parse_rfc3339("2021-03-11T12:31:31.561+03:00"), Some(1_615_455_091_561));
-        assert_eq!(parse_rfc3339("2021-03-11T09:31:31.561Z"), Some(1_615_455_091_561));
-        assert_eq!(parse_rfc3339("2014-01-20T00:00:00.000+04:00"), Some(1_390_161_600_000));
-        assert_eq!(parse_rfc3339("2026-09-23T10:11:10+0000"), Some(1_790_158_270_000));
+        assert_eq!(
+            parse_rfc3339("2021-03-11T12:31:31.561+03:00"),
+            Some(1_615_455_091_561)
+        );
+        assert_eq!(
+            parse_rfc3339("2021-03-11T09:31:31.561Z"),
+            Some(1_615_455_091_561)
+        );
+        assert_eq!(
+            parse_rfc3339("2014-01-20T00:00:00.000+04:00"),
+            Some(1_390_161_600_000)
+        );
+        assert_eq!(
+            parse_rfc3339("2026-09-23T10:11:10+0000"),
+            Some(1_790_158_270_000)
+        );
     }
 
     #[test]
     fn rfc3339_rejects_garbage() {
-        for bad in ["", "2021-03-11", "2021-13-01T00:00:00Z", "2021-03-11T25:00:00Z", "2021-03-11T00:00:00", "x021-03-11T00:00:00Z"] {
+        for bad in [
+            "",
+            "2021-03-11",
+            "2021-13-01T00:00:00Z",
+            "2021-03-11T25:00:00Z",
+            "2021-03-11T00:00:00",
+            "x021-03-11T00:00:00Z",
+        ] {
             assert_eq!(parse_rfc3339(bad), None, "{bad}");
         }
     }
 
     #[test]
     fn ruby_time_as_sent_in_rate_limit_reset() {
-        assert_eq!(parse_ruby_time("2026-09-23 10:11:10 +0000"), Some(1_790_158_270_000));
-        assert_eq!(parse_rate_limit_reset("2026-09-23 10:11:10 +0000"), Some(1_790_158_270_000));
-        assert_eq!(parse_rate_limit_reset("2026-09-23T10:11:10+00:00"), Some(1_790_158_270_000));
+        assert_eq!(
+            parse_ruby_time("2026-09-23 10:11:10 +0000"),
+            Some(1_790_158_270_000)
+        );
+        assert_eq!(
+            parse_rate_limit_reset("2026-09-23 10:11:10 +0000"),
+            Some(1_790_158_270_000)
+        );
+        assert_eq!(
+            parse_rate_limit_reset("2026-09-23T10:11:10+00:00"),
+            Some(1_790_158_270_000)
+        );
     }
 
     #[test]
     fn http_date_header() {
-        assert_eq!(parse_http_date("Wed, 23 Sep 2026 10:11:09 GMT"), Some(1_790_158_269_000));
+        assert_eq!(
+            parse_http_date("Wed, 23 Sep 2026 10:11:09 GMT"),
+            Some(1_790_158_269_000)
+        );
         assert_eq!(parse_http_date("Wed, 23 Sep 2026 10:11:09 MSK"), None);
     }
 

@@ -41,7 +41,11 @@ impl Schema {
             .into_iter()
             .map(|key| {
                 let ty = infer_type(rows.iter().filter_map(|r| r.get(&key)));
-                Column { name: key.name(), key, ty }
+                Column {
+                    name: key.name(),
+                    key,
+                    ty,
+                }
             })
             .collect();
         Schema { columns }
@@ -67,12 +71,10 @@ fn infer_type<'a>(values: impl Iterator<Item = &'a Value>) -> LogicalType {
         found = Some(match (found, ty) {
             (None, t) => t,
             (Some(a), b) if a == b => a,
-            (Some(LogicalType::Int64), LogicalType::Float64) | (Some(LogicalType::Float64), LogicalType::Int64) => {
-                LogicalType::Float64
-            }
-            (Some(LogicalType::Timestamp), LogicalType::String) | (Some(LogicalType::String), LogicalType::Timestamp) => {
-                LogicalType::String
-            }
+            (Some(LogicalType::Int64), LogicalType::Float64)
+            | (Some(LogicalType::Float64), LogicalType::Int64) => LogicalType::Float64,
+            (Some(LogicalType::Timestamp), LogicalType::String)
+            | (Some(LogicalType::String), LogicalType::Timestamp) => LogicalType::String,
             _ => LogicalType::Json,
         });
     }
@@ -88,7 +90,12 @@ mod tests {
     use serde_json::json;
 
     fn ty(schema: &Schema, name: &str) -> LogicalType {
-        schema.columns.iter().find(|c| c.name == name).unwrap_or_else(|| panic!("{name}")).ty
+        schema
+            .columns
+            .iter()
+            .find(|c| c.name == name)
+            .unwrap_or_else(|| panic!("{name}"))
+            .ty
     }
 
     #[test]
@@ -103,14 +110,31 @@ mod tests {
         assert_eq!(ty(&schema, "likes"), LogicalType::Int64);
         assert_eq!(ty(&schema, "created_at"), LogicalType::Timestamp);
         assert_eq!(ty(&schema, "custom_attributes"), LogicalType::Json);
-        assert_eq!(ty(&schema, "author_ip"), LogicalType::Json, "только null → json");
+        assert_eq!(
+            ty(&schema, "author_ip"),
+            LogicalType::Json,
+            "только null → json"
+        );
     }
 
     #[test]
     fn mixed_numbers_widen_and_conflicts_fall_back_to_json() {
         let row = |v: Value| Row::from([(ColumnKey::Attribute("x".into()), v)]);
-        assert_eq!(ty(&Schema::infer(&[row(json!(1)), row(json!(1.5))]), "x"), LogicalType::Float64);
-        assert_eq!(ty(&Schema::infer(&[row(json!("a")), row(json!(true))]), "x"), LogicalType::Json);
-        assert_eq!(Schema::infer(&[]).columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["id", "type"]);
+        assert_eq!(
+            ty(&Schema::infer(&[row(json!(1)), row(json!(1.5))]), "x"),
+            LogicalType::Float64
+        );
+        assert_eq!(
+            ty(&Schema::infer(&[row(json!("a")), row(json!(true))]), "x"),
+            LogicalType::Json
+        );
+        assert_eq!(
+            Schema::infer(&[])
+                .columns
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            ["id", "type"]
+        );
     }
 }

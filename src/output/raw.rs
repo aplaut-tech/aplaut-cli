@@ -33,7 +33,11 @@ impl RecordSink for RawSink {
         self.out.flush().map_err(write_error)?;
         // Дубли в raw не отбрасываются — тело не меняем; только считаем для сообщения.
         let duplicates = page.data.iter().filter(|r| is_duplicate(r, seen)).count() as u64;
-        Ok(PageReport { written: page.data.len() as u64, duplicates, commit: Commit::Durable })
+        Ok(PageReport {
+            written: page.data.len() as u64,
+            duplicates,
+            commit: Commit::Durable,
+        })
     }
 
     fn finish(&mut self) -> Result<Commit, CliError> {
@@ -57,8 +61,18 @@ mod tests {
         let out = buf.contents();
         assert_eq!(out.matches('\n').count(), 1);
         let reparsed: serde_json::Value = serde_json::from_str(out.trim_end()).unwrap();
-        assert_eq!(reparsed, serde_json::from_slice::<serde_json::Value>(&page.body).unwrap());
-        assert_eq!(report, PageReport { written: 2, duplicates: 0, commit: Commit::Durable });
+        assert_eq!(
+            reparsed,
+            serde_json::from_slice::<serde_json::Value>(&page.body).unwrap()
+        );
+        assert_eq!(
+            report,
+            PageReport {
+                written: 2,
+                duplicates: 0,
+                commit: Commit::Durable
+            }
+        );
     }
 
     #[test]

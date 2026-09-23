@@ -28,9 +28,21 @@ pub struct Resource {
     pub verbs: &'static [Verb],
 }
 
-pub static REVIEWS: Resource = Resource { name: "reviews", records_type: "reviews", verbs: &[Verb::Scroll] };
-pub static PRODUCTS: Resource = Resource { name: "products", records_type: "products", verbs: &[Verb::Scroll] };
-pub static QUESTIONS: Resource = Resource { name: "questions", records_type: "questions", verbs: &[Verb::Scroll] };
+pub static REVIEWS: Resource = Resource {
+    name: "reviews",
+    records_type: "reviews",
+    verbs: &[Verb::Scroll],
+};
+pub static PRODUCTS: Resource = Resource {
+    name: "products",
+    records_type: "products",
+    verbs: &[Verb::Scroll],
+};
+pub static QUESTIONS: Resource = Resource {
+    name: "questions",
+    records_type: "questions",
+    verbs: &[Verb::Scroll],
+};
 
 pub static ALL: &[&Resource] = &[&REVIEWS, &PRODUCTS, &QUESTIONS];
 

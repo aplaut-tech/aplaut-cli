@@ -39,15 +39,29 @@ struct Wire {
 impl Page {
     pub fn parse(body: Vec<u8>) -> Result<Page, CliError> {
         let wire: Wire = serde_json::from_slice(&body).map_err(|e| {
-            CliError::general("bad_response", format!("ответ сервера не похож на страницу обхода: {e}"))
-                .retryable(true)
-                .with_hint("между CLI и API может стоять прокси, или идут технические работы; повторите позже")
+            CliError::general(
+                "bad_response",
+                format!("ответ сервера не похож на страницу обхода: {e}"),
+            )
+            .retryable(true)
+            .with_hint(
+                "между CLI и API может стоять прокси, или идут технические работы; повторите позже",
+            )
         })?;
-        Ok(Page { body, data: wire.data, included: wire.included, meta: wire.meta })
+        Ok(Page {
+            body,
+            data: wire.data,
+            included: wire.included,
+            meta: wire.meta,
+        })
     }
 
     pub fn ids(&self) -> Vec<String> {
-        self.data.iter().filter_map(record_id).map(str::to_string).collect()
+        self.data
+            .iter()
+            .filter_map(record_id)
+            .map(str::to_string)
+            .collect()
     }
 }
 
@@ -64,7 +78,10 @@ impl<'a> IncludedIndex<'a> {
     pub fn new(included: &'a [Value]) -> Self {
         let mut by_type: HashMap<&'a str, HashMap<&'a str, &'a Value>> = HashMap::new();
         for object in included {
-            if let (Some(kind), Some(id)) = (object.get("type").and_then(Value::as_str), record_id(object)) {
+            if let (Some(kind), Some(id)) = (
+                object.get("type").and_then(Value::as_str),
+                record_id(object),
+            ) {
                 by_type.entry(kind).or_default().insert(id, object);
             }
         }
@@ -85,9 +102,15 @@ mod tests {
     #[test]
     fn parses_observed_page_shape() {
         let page = Page::parse(FIXTURE.as_bytes().to_vec()).unwrap();
-        assert_eq!(page.ids(), vec!["0000000000000000aa000001", "0000000000000000aa000004"]);
+        assert_eq!(
+            page.ids(),
+            vec!["0000000000000000aa000001", "0000000000000000aa000004"]
+        );
         assert_eq!(page.meta.cursor.as_deref(), Some("fixture-cursor-1"));
-        assert_eq!((page.meta.has_more, page.meta.total_count), (true, Some(744)));
+        assert_eq!(
+            (page.meta.has_more, page.meta.total_count),
+            (true, Some(744))
+        );
         let index = IncludedIndex::new(&page.included);
         assert!(index.get("consumers", "0000000000000000aa000002").is_some());
         assert!(index.get("products", "0000000000000000aa000002").is_none());

@@ -26,3 +26,12 @@ ureq = "3.4"
 
 [build-dependencies]
 yaml-rust2 = "0.13"
+
+# `publish = false` защищает от случайной публикации в crates.io, но dist из-за него не видит бинарь.
+[package.metadata.dist]
+dist = true
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

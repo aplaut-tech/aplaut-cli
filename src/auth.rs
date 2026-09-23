@@ -166,11 +166,12 @@ pub fn validate_profile_name(name: &str) -> Result<(), CliError> {
     {
         return Ok(());
     }
-    Err(
-        CliError::usage("invalid_profile", format!("недопустимое имя профиля «{name}»"))
-            .with_field("profile")
-            .with_hint("используйте латиницу, цифры, - и _"),
+    Err(CliError::usage(
+        "invalid_profile",
+        format!("недопустимое имя профиля «{name}»"),
     )
+    .with_field("profile")
+    .with_hint("используйте латиницу, цифры, - и _"))
 }
 
 pub fn resolve_base_url(
@@ -232,10 +233,12 @@ fn host_of(authority: &str) -> Option<&str> {
 fn profile_token(creds: &CredentialsFile, name: &str) -> Result<Secret, CliError> {
     match creds.profiles.get(name) {
         Some(entry) => parse_token(&entry.access_token),
-        None => Err(
-            CliError::new(Exit::Auth, "no_token", format!("в профиле «{name}» нет токена"))
-                .with_hint(format!("выполните aplaut auth login --profile {name}")),
-        ),
+        None => Err(CliError::new(
+            Exit::Auth,
+            "no_token",
+            format!("в профиле «{name}» нет токена"),
+        )
+        .with_hint(format!("выполните aplaut auth login --profile {name}"))),
     }
 }
 
@@ -247,42 +250,89 @@ mod tests {
     fn creds(entries: &[(&str, &str)]) -> CredentialsFile {
         let mut c = CredentialsFile::default();
         for (name, token) in entries {
-            c.profiles.insert(name.to_string(), ProfileCredentials { access_token: token.to_string() });
+            c.profiles.insert(
+                name.to_string(),
+                ProfileCredentials {
+                    access_token: token.to_string(),
+                },
+            );
         }
         c
     }
 
-    fn resolve(flags: &TokenFlags, env: &EnvSnapshot, creds: &CredentialsFile, stdin: &str, tty: bool) -> Result<(String, TokenSource), CliError> {
+    fn resolve(
+        flags: &TokenFlags,
+        env: &EnvSnapshot,
+        creds: &CredentialsFile,
+        stdin: &str,
+        tty: bool,
+    ) -> Result<(String, TokenSource), CliError> {
         let mut reader = stdin.as_bytes();
-        let mut src = StdinSource { is_terminal: tty, reader: &mut reader };
+        let mut src = StdinSource {
+            is_terminal: tty,
+            reader: &mut reader,
+        };
         resolve_token(flags, env, creds, &mut src).map(|(s, src)| (s.expose().to_string(), src))
     }
 
     fn no_flags() -> TokenFlags<'static> {
-        TokenFlags { token_stdin: false, token_file: None, profile: None }
+        TokenFlags {
+            token_stdin: false,
+            token_file: None,
+            profile: None,
+        }
     }
 
     #[test]
     fn explicit_profile_beats_env_token() {
-        let env = EnvSnapshot { access_token: Some("env-tok".into()), ..EnvSnapshot::default() };
-        let flags = TokenFlags { profile: Some("ci"), ..no_flags() };
+        let env = EnvSnapshot {
+            access_token: Some("env-tok".into()),
+            ..EnvSnapshot::default()
+        };
+        let flags = TokenFlags {
+            profile: Some("ci"),
+            ..no_flags()
+        };
         let (tok, src) = resolve(&flags, &env, &creds(&[("ci", "ci-tok")]), "", false).unwrap();
-        assert_eq!((tok.as_str(), src), ("ci-tok", TokenSource::Profile("ci".into())));
+        assert_eq!(
+            (tok.as_str(), src),
+            ("ci-tok", TokenSource::Profile("ci".into()))
+        );
     }
 
     #[test]
     fn stdin_flag_beats_everything() {
-        let env = EnvSnapshot { access_token: Some("env-tok".into()), ..EnvSnapshot::default() };
-        let flags = TokenFlags { token_stdin: true, profile: Some("ci"), ..no_flags() };
-        let (tok, src) = resolve(&flags, &env, &creds(&[("ci", "ci-tok")]), "stdin-tok\n", false).unwrap();
+        let env = EnvSnapshot {
+            access_token: Some("env-tok".into()),
+            ..EnvSnapshot::default()
+        };
+        let flags = TokenFlags {
+            token_stdin: true,
+            profile: Some("ci"),
+            ..no_flags()
+        };
+        let (tok, src) = resolve(
+            &flags,
+            &env,
+            &creds(&[("ci", "ci-tok")]),
+            "stdin-tok\n",
+            false,
+        )
+        .unwrap();
         assert_eq!((tok.as_str(), src), ("stdin-tok", TokenSource::Stdin));
     }
 
     #[test]
     fn stdin_terminal_is_rejected_instead_of_hanging() {
-        let flags = TokenFlags { token_stdin: true, ..no_flags() };
+        let flags = TokenFlags {
+            token_stdin: true,
+            ..no_flags()
+        };
         let err = resolve(&flags, &EnvSnapshot::default(), &creds(&[]), "", true).unwrap_err();
-        assert_eq!((err.code.as_str(), err.exit), ("stdin_is_terminal", Exit::Usage));
+        assert_eq!(
+            (err.code.as_str(), err.exit),
+            ("stdin_is_terminal", Exit::Usage)
+        );
     }
 
     #[test]
@@ -298,38 +348,89 @@ mod tests {
             ..EnvSnapshot::default()
         };
         let c = creds(&[("prod", "prod-tok"), ("default", "def-tok")]);
-        assert_eq!(resolve(&no_flags(), &all, &c, "", false).unwrap().0, "file-tok");
-        let no_file = EnvSnapshot { access_token_file: None, ..all.clone() };
-        assert_eq!(resolve(&no_flags(), &no_file, &c, "", false).unwrap().0, "env-tok");
-        let only_profile = EnvSnapshot { access_token: None, ..no_file.clone() };
-        assert_eq!(resolve(&no_flags(), &only_profile, &c, "", false).unwrap().0, "prod-tok");
-        assert_eq!(resolve(&no_flags(), &EnvSnapshot::default(), &c, "", false).unwrap().1, TokenSource::DefaultProfile);
+        assert_eq!(
+            resolve(&no_flags(), &all, &c, "", false).unwrap().0,
+            "file-tok"
+        );
+        let no_file = EnvSnapshot {
+            access_token_file: None,
+            ..all.clone()
+        };
+        assert_eq!(
+            resolve(&no_flags(), &no_file, &c, "", false).unwrap().0,
+            "env-tok"
+        );
+        let only_profile = EnvSnapshot {
+            access_token: None,
+            ..no_file.clone()
+        };
+        assert_eq!(
+            resolve(&no_flags(), &only_profile, &c, "", false)
+                .unwrap()
+                .0,
+            "prod-tok"
+        );
+        assert_eq!(
+            resolve(&no_flags(), &EnvSnapshot::default(), &c, "", false)
+                .unwrap()
+                .1,
+            TokenSource::DefaultProfile
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn missing_token_is_auth_error_with_hint() {
-        let err = resolve(&no_flags(), &EnvSnapshot::default(), &creds(&[]), "", false).unwrap_err();
+        let err =
+            resolve(&no_flags(), &EnvSnapshot::default(), &creds(&[]), "", false).unwrap_err();
         assert_eq!((err.code.as_str(), err.exit), ("no_token", Exit::Auth));
         assert!(err.hint.unwrap().contains("aplaut auth login"));
-        let flags = TokenFlags { profile: Some("ghost"), ..no_flags() };
+        let flags = TokenFlags {
+            profile: Some("ghost"),
+            ..no_flags()
+        };
         let err = resolve(&flags, &EnvSnapshot::default(), &creds(&[]), "", false).unwrap_err();
         assert!(err.hint.unwrap().contains("--profile ghost"));
     }
 
     #[test]
     fn base_url_precedence_and_https_rule() {
-        let env = EnvSnapshot { base_url: Some("https://env.example/v4".into()), ..EnvSnapshot::default() };
-        let profile = ProfileConfig { base_url: Some("https://profile.example/v4".into()) };
-        assert_eq!(resolve_base_url(Some("https://flag.example/v4/"), &env, Some(&profile)).unwrap(), "https://flag.example/v4");
-        assert_eq!(resolve_base_url(None, &env, Some(&profile)).unwrap(), "https://env.example/v4");
-        assert_eq!(resolve_base_url(None, &EnvSnapshot::default(), Some(&profile)).unwrap(), "https://profile.example/v4");
-        assert_eq!(resolve_base_url(None, &EnvSnapshot::default(), None).unwrap(), DEFAULT_BASE_URL);
-        for ok in ["http://localhost:3000/v4", "http://127.0.0.1:8080/v4", "http://[::1]:9000/v4", "http://api.localhost/v4"] {
+        let env = EnvSnapshot {
+            base_url: Some("https://env.example/v4".into()),
+            ..EnvSnapshot::default()
+        };
+        let profile = ProfileConfig {
+            base_url: Some("https://profile.example/v4".into()),
+        };
+        assert_eq!(
+            resolve_base_url(Some("https://flag.example/v4/"), &env, Some(&profile)).unwrap(),
+            "https://flag.example/v4"
+        );
+        assert_eq!(
+            resolve_base_url(None, &env, Some(&profile)).unwrap(),
+            "https://env.example/v4"
+        );
+        assert_eq!(
+            resolve_base_url(None, &EnvSnapshot::default(), Some(&profile)).unwrap(),
+            "https://profile.example/v4"
+        );
+        assert_eq!(
+            resolve_base_url(None, &EnvSnapshot::default(), None).unwrap(),
+            DEFAULT_BASE_URL
+        );
+        for ok in [
+            "http://localhost:3000/v4",
+            "http://127.0.0.1:8080/v4",
+            "http://[::1]:9000/v4",
+            "http://api.localhost/v4",
+        ] {
             assert!(validate_base_url(ok).is_ok(), "{ok}");
         }
         let err = validate_base_url("http://api.aplaut.io/v4").unwrap_err();
-        assert_eq!((err.code.as_str(), err.field.as_deref()), ("insecure_base_url", Some("base_url")));
+        assert_eq!(
+            (err.code.as_str(), err.field.as_deref()),
+            ("insecure_base_url", Some("base_url"))
+        );
         assert!(validate_base_url("ftp://x/v4").is_err());
         assert!(validate_base_url("api.aplaut.io/v4").is_err());
     }

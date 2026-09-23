@@ -132,16 +132,32 @@ mod tests {
     fn paths(tag: &str) -> Paths {
         let base = std::env::temp_dir().join(format!("aplaut-config-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
-        let env = EnvSnapshot { xdg_config_home: Some(base), ..EnvSnapshot::default() };
+        let env = EnvSnapshot {
+            xdg_config_home: Some(base),
+            ..EnvSnapshot::default()
+        };
         Paths::resolve(&env).unwrap()
     }
 
     #[test]
     fn xdg_then_home() {
-        let env = EnvSnapshot { home: Some("/home/u".into()), ..EnvSnapshot::default() };
-        assert_eq!(Paths::resolve(&env).unwrap().config, PathBuf::from("/home/u/.config/aplaut/config.toml"));
-        let env = EnvSnapshot { xdg_config_home: Some("/x".into()), home: Some("/home/u".into()), ..EnvSnapshot::default() };
-        assert_eq!(Paths::resolve(&env).unwrap().credentials, PathBuf::from("/x/aplaut/credentials"));
+        let env = EnvSnapshot {
+            home: Some("/home/u".into()),
+            ..EnvSnapshot::default()
+        };
+        assert_eq!(
+            Paths::resolve(&env).unwrap().config,
+            PathBuf::from("/home/u/.config/aplaut/config.toml")
+        );
+        let env = EnvSnapshot {
+            xdg_config_home: Some("/x".into()),
+            home: Some("/home/u".into()),
+            ..EnvSnapshot::default()
+        };
+        assert_eq!(
+            Paths::resolve(&env).unwrap().credentials,
+            PathBuf::from("/x/aplaut/credentials")
+        );
         assert!(Paths::resolve(&EnvSnapshot::default()).is_err());
     }
 
@@ -149,25 +165,49 @@ mod tests {
     fn roundtrip_with_private_permissions() {
         let p = paths("roundtrip");
         let mut creds = CredentialsFile::default();
-        creds.profiles.insert("ci".into(), ProfileCredentials { access_token: "tok".into() });
+        creds.profiles.insert(
+            "ci".into(),
+            ProfileCredentials {
+                access_token: "tok".into(),
+            },
+        );
         save_credentials(&p, &creds).unwrap();
         let mut cfg = ConfigFile::default();
-        cfg.profiles.insert("ci".into(), ProfileConfig { base_url: Some("https://x/v4".into()) });
+        cfg.profiles.insert(
+            "ci".into(),
+            ProfileConfig {
+                base_url: Some("https://x/v4".into()),
+            },
+        );
         save_config(&p, &cfg).unwrap();
-        let reporter = Reporter::with_writer(false, false, false, false, Box::new(SharedBuf::default()));
+        let reporter =
+            Reporter::with_writer(false, false, false, false, Box::new(SharedBuf::default()));
         assert_eq!(load_credentials(&p, &reporter).unwrap(), creds);
         assert_eq!(load_config(&p).unwrap(), cfg);
-        assert_eq!(fs::metadata(&p.credentials).unwrap().permissions().mode() & 0o777, 0o600);
-        assert_eq!(fs::metadata(&p.dir).unwrap().permissions().mode() & 0o777, 0o700);
-        assert!(!format!("{creds:?}").contains("tok\""), "Debug не должен показывать токен");
+        assert_eq!(
+            fs::metadata(&p.credentials).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::metadata(&p.dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert!(
+            !format!("{creds:?}").contains("tok\""),
+            "Debug не должен показывать токен"
+        );
         fs::remove_dir_all(p.dir.parent().unwrap()).unwrap();
     }
 
     #[test]
     fn missing_files_are_empty() {
         let p = paths("missing");
-        let reporter = Reporter::with_writer(false, false, false, false, Box::new(SharedBuf::default()));
-        assert_eq!(load_credentials(&p, &reporter).unwrap(), CredentialsFile::default());
+        let reporter =
+            Reporter::with_writer(false, false, false, false, Box::new(SharedBuf::default()));
+        assert_eq!(
+            load_credentials(&p, &reporter).unwrap(),
+            CredentialsFile::default()
+        );
         assert_eq!(load_config(&p).unwrap(), ConfigFile::default());
     }
 
@@ -175,12 +215,21 @@ mod tests {
     fn broken_credentials_error_does_not_echo_token() {
         let p = paths("broken");
         fs::create_dir_all(&p.dir).unwrap();
-        fs::write(&p.credentials, "[profiles.ci]\naccess_token = \"super-secret-token\n").unwrap();
+        fs::write(
+            &p.credentials,
+            "[profiles.ci]\naccess_token = \"super-secret-token\n",
+        )
+        .unwrap();
         fs::set_permissions(&p.credentials, fs::Permissions::from_mode(0o600)).unwrap();
-        let reporter = Reporter::with_writer(false, false, false, false, Box::new(SharedBuf::default()));
+        let reporter =
+            Reporter::with_writer(false, false, false, false, Box::new(SharedBuf::default()));
         let err = load_credentials(&p, &reporter).unwrap_err();
         assert_eq!(err.code, "credentials_invalid");
-        assert!(!err.message.contains("super-secret-token"), "{}", err.message);
+        assert!(
+            !err.message.contains("super-secret-token"),
+            "{}",
+            err.message
+        );
         fs::remove_dir_all(p.dir.parent().unwrap()).unwrap();
     }
 

@@ -139,7 +139,10 @@ mod tests {
 
     fn captured(quiet: bool, verbose: bool, tty: bool) -> (Reporter, SharedBuf) {
         let buf = SharedBuf::default();
-        (Reporter::with_writer(quiet, verbose, tty, false, Box::new(buf.clone())), buf)
+        (
+            Reporter::with_writer(quiet, verbose, tty, false, Box::new(buf.clone())),
+            buf,
+        )
     }
 
     #[test]
@@ -177,8 +180,29 @@ mod tests {
         assert!(color_enabled(true, false, &env));
         assert!(!color_enabled(false, false, &env));
         assert!(!color_enabled(true, true, &env));
-        assert!(!color_enabled(true, false, &TermEnv { no_color: true, ..TermEnv::default() }));
-        assert!(!color_enabled(true, false, &TermEnv { term_dumb: true, ..TermEnv::default() }));
-        assert!(!color_enabled(true, false, &TermEnv { aplaut_no_color: true, ..TermEnv::default() }));
+        assert!(!color_enabled(
+            true,
+            false,
+            &TermEnv {
+                no_color: true,
+                ..TermEnv::default()
+            }
+        ));
+        assert!(!color_enabled(
+            true,
+            false,
+            &TermEnv {
+                term_dumb: true,
+                ..TermEnv::default()
+            }
+        ));
+        assert!(!color_enabled(
+            true,
+            false,
+            &TermEnv {
+                aplaut_no_color: true,
+                ..TermEnv::default()
+            }
+        ));
     }
 }

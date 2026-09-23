@@ -73,7 +73,10 @@ mod tests {
         let path = dir.join("state.json");
         write_atomic(&path, b"{}").unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"{}");
-        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
         let leftovers: Vec<_> = fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).collect();
         assert_eq!(leftovers.len(), 1);
         fs::remove_dir_all(&dir).unwrap();
@@ -96,7 +99,10 @@ mod tests {
         let dir = scratch("dir");
         let conf = dir.join("aplaut");
         ensure_private_dir(&conf).unwrap();
-        assert_eq!(fs::metadata(&conf).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(
+            fs::metadata(&conf).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
         let file = conf.join("credentials");
         fs::write(&file, "x").unwrap();
         fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();

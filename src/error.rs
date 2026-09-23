@@ -129,7 +129,11 @@ pub fn render_json(err: &CliError, command: &str) -> String {
 
 /// Для человека: сообщение, детали, подсказка последней строкой (clig: важное — в конце).
 pub fn render_human(err: &CliError, color: bool) -> String {
-    let label = if color { "\x1b[31merror\x1b[0m" } else { "error" };
+    let label = if color {
+        "\x1b[31merror\x1b[0m"
+    } else {
+        "error"
+    };
     let mut text = format!("{label}: {}\n", err.message);
     if let Some(field) = &err.field {
         text.push_str(&format!("  параметр: {field}\n"));
@@ -169,7 +173,8 @@ mod tests {
         let err = CliError::usage("invalid_include", "неизвестный include «nope»")
             .with_field("include")
             .with_hint("допустимые значения: author, product");
-        let v: serde_json::Value = serde_json::from_str(&render_json(&err, "reviews.scroll")).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(&render_json(&err, "reviews.scroll")).unwrap();
         assert_eq!(v["ok"], false);
         assert_eq!(v["command"], "reviews.scroll");
         assert_eq!(v["cli_version"], env!("CARGO_PKG_VERSION"));
@@ -193,7 +198,9 @@ mod tests {
 
     #[test]
     fn partial_keeps_original_cause() {
-        let err = CliError::general("network_error", "обрыв").retryable(true).into_partial();
+        let err = CliError::general("network_error", "обрыв")
+            .retryable(true)
+            .into_partial();
         assert_eq!(err.exit, Exit::Partial);
         assert_eq!(err.code, "network_error");
         assert!(err.retryable);

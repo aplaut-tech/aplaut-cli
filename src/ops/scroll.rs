@@ -76,13 +76,18 @@ pub fn run(
         }
         if page.meta.has_more && page.meta.cursor.is_none() {
             return Err(partial_if(
-                CliError::general("bad_response", "сервер сообщил has_more, но не вернул курсор")
-                    .with_request_id(request_id),
+                CliError::general(
+                    "bad_response",
+                    "сервер сообщил has_more, но не вернул курсор",
+                )
+                .with_request_id(request_id),
                 outcome.emitted,
             ));
         }
         let seen: HashSet<String> = state.last_page_ids.iter().cloned().collect();
-        let report = sink.write_page(&page, &seen).map_err(|e| partial_if(e, outcome.emitted))?;
+        let report = sink
+            .write_page(&page, &seen)
+            .map_err(|e| partial_if(e, outcome.emitted))?;
         outcome.pages += 1;
         outcome.emitted += report.written;
         outcome.duplicates += report.duplicates;
@@ -93,11 +98,19 @@ pub fn run(
         if report.commit == Commit::Durable {
             save(job.state_path, &mut state, clock).map_err(|e| partial_if(e, outcome.emitted))?;
         }
-        reporter.progress(&progress_line(job.records_type, state.emitted, state.total_count));
+        reporter.progress(&progress_line(
+            job.records_type,
+            state.emitted,
+            state.total_count,
+        ));
         if state.completed {
             break;
         }
-        stale_pages = if report.written == 0 { stale_pages + 1 } else { 0 };
+        stale_pages = if report.written == 0 {
+            stale_pages + 1
+        } else {
+            0
+        };
         if stale_pages >= MAX_STALE_PAGES {
             return Err(partial_if(
                 CliError::general(

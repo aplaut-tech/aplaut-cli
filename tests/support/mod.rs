@@ -95,11 +95,17 @@ pub struct RecordedRequest {
 impl RecordedRequest {
     pub fn header(&self, name: &str) -> Option<&str> {
         let name = name.to_ascii_lowercase();
-        self.headers.iter().find(|(k, _)| *k == name).map(|(_, v)| v.as_str())
+        self.headers
+            .iter()
+            .find(|(k, _)| *k == name)
+            .map(|(_, v)| v.as_str())
     }
 
     pub fn query_param(&self, name: &str) -> Option<&str> {
-        self.query.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
+        self.query
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
     }
 
     pub fn query_keys(&self) -> Vec<&str> {
@@ -109,7 +115,11 @@ impl RecordedRequest {
 
 #[derive(Debug, Clone)]
 pub enum Reply {
-    Http { status: u16, headers: Vec<(String, String)>, body: Vec<u8> },
+    Http {
+        status: u16,
+        headers: Vec<(String, String)>,
+        body: Vec<u8>,
+    },
     /// Закрыть соединение, не ответив: так выглядит обрыв сети для клиента.
     Hangup,
 }
@@ -118,20 +128,35 @@ impl Reply {
     pub fn json(status: u16, body: impl Into<String>) -> Reply {
         Reply::Http {
             status,
-            headers: vec![("Content-Type".into(), "application/vnd.api+json; charset=utf-8".into())],
+            headers: vec![(
+                "Content-Type".into(),
+                "application/vnd.api+json; charset=utf-8".into(),
+            )],
             body: body.into().into_bytes(),
         }
     }
 
     pub fn text(status: u16, body: impl Into<String>) -> Reply {
-        Reply::Http { status, headers: vec![], body: body.into().into_bytes() }
+        Reply::Http {
+            status,
+            headers: vec![],
+            body: body.into().into_bytes(),
+        }
     }
 
     pub fn with_header(self, key: &str, value: &str) -> Reply {
         match self {
-            Reply::Http { status, mut headers, body } => {
+            Reply::Http {
+                status,
+                mut headers,
+                body,
+            } => {
                 headers.push((key.into(), value.into()));
-                Reply::Http { status, headers, body }
+                Reply::Http {
+                    status,
+                    headers,
+                    body,
+                }
             }
             Reply::Hangup => Reply::Hangup,
         }
@@ -160,18 +185,27 @@ impl MockServer {
                     break;
                 }
                 let Ok(mut stream) = stream else { continue };
-                let Some(request) = read_request(&mut stream) else { continue };
+                let Some(request) = read_request(&mut stream) else {
+                    continue;
+                };
                 log.lock().unwrap().push(request);
                 match replies.next() {
-                    Some(Reply::Http { status, headers, body }) => {
-                        write_response(&mut stream, status, &headers, &body)
-                    }
+                    Some(Reply::Http {
+                        status,
+                        headers,
+                        body,
+                    }) => write_response(&mut stream, status, &headers, &body),
                     Some(Reply::Hangup) => {}
                     None => write_response(&mut stream, 599, &[], b"mock: no more replies"),
                 }
             }
         });
-        MockServer { addr, requests, stop, handle: Some(handle) }
+        MockServer {
+            addr,
+            requests,
+            stop,
+            handle: Some(handle),
+        }
     }
 
     pub fn base_url(&self) -> String {
@@ -219,7 +253,12 @@ fn read_request(stream: &mut TcpStream) -> Option<RecordedRequest> {
         Some((p, q)) => (p.to_string(), parse_query(q)),
         None => (target, Vec::new()),
     };
-    Some(RecordedRequest { method, path, query, headers })
+    Some(RecordedRequest {
+        method,
+        path,
+        query,
+        headers,
+    })
 }
 
 fn write_response(stream: &mut TcpStream, status: u16, headers: &[(String, String)], body: &[u8]) {
@@ -310,7 +349,8 @@ pub fn first_page_json(
     total: u64,
     applied_filter: Option<&str>,
 ) -> String {
-    let mut page: serde_json::Value = serde_json::from_str(&page_json(records, cursor, has_more)).unwrap();
+    let mut page: serde_json::Value =
+        serde_json::from_str(&page_json(records, cursor, has_more)).unwrap();
     page["meta"]["total_count"] = total.into();
     if let Some(f) = applied_filter {
         page["meta"]["applied_filter"] = f.into();
@@ -329,6 +369,8 @@ pub fn spawn(home: &Path, args: &[&str], env: &[(&str, &str)]) -> std::process::
     for (k, v) in env {
         cmd.env(k, v);
     }
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     cmd.spawn().expect("запуск aplaut")
 }

@@ -36,16 +36,24 @@ fn every_command_maps_to_a_spec_operation() {
         if resources::LOCAL_COMMANDS.contains(&joined.as_str()) {
             continue;
         }
-        let resource = resources::find(&path[0]).unwrap_or_else(|| panic!("«{joined}» не описана в resources.rs"));
+        let resource = resources::find(&path[0])
+            .unwrap_or_else(|| panic!("«{joined}» не описана в resources.rs"));
         let verb = resource
             .verbs
             .iter()
             .find(|v| v.name() == path[1])
             .unwrap_or_else(|| panic!("«{joined}»: глагол не описан у ресурса в resources.rs"));
         let (method, operation) = verb.operation();
-        assert!(spec::has_operation(method, operation), "«{joined}» → {method} {operation}: нет в spec/api.yaml");
+        assert!(
+            spec::has_operation(method, operation),
+            "«{joined}» → {method} {operation}: нет в spec/api.yaml"
+        );
         if *verb == Verb::Scroll {
-            assert!(spec::scroll_spec(resource.records_type).is_some(), "«{joined}»: {} не поддерживается scroll", resource.records_type);
+            assert!(
+                spec::scroll_spec(resource.records_type).is_some(),
+                "«{joined}»: {} не поддерживается scroll",
+                resource.records_type
+            );
         }
     }
 }
@@ -56,11 +64,17 @@ fn every_resource_verb_and_local_command_is_exposed() {
     for resource in resources::ALL {
         for verb in resource.verbs {
             let path = vec![resource.name.to_string(), verb.name().to_string()];
-            assert!(commands.contains(&path), "{path:?} есть в resources.rs, но не в CLI");
+            assert!(
+                commands.contains(&path),
+                "{path:?} есть в resources.rs, но не в CLI"
+            );
         }
     }
     for local in resources::LOCAL_COMMANDS {
         let path: Vec<String> = local.split(' ').map(str::to_string).collect();
-        assert!(commands.contains(&path), "{local} объявлена локальной, но не существует");
+        assert!(
+            commands.contains(&path),
+            "{local} объявлена локальной, но не существует"
+        );
     }
 }

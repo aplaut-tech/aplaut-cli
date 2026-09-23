@@ -26,7 +26,14 @@ pub struct CsvSink {
 
 impl CsvSink {
     pub fn new(out: Box<dyn Write>, include: Vec<String>, reporter: Rc<Reporter>) -> Self {
-        CsvSink { out, include, reporter, schema: None, warned_new_columns: false, warned_to_many: false }
+        CsvSink {
+            out,
+            include,
+            reporter,
+            schema: None,
+            warned_new_columns: false,
+            warned_to_many: false,
+        }
     }
 
     fn warn_to_many(&mut self, record: &Value) {
@@ -36,7 +43,11 @@ impl CsvSink {
         let lists: Vec<&str> = self
             .include
             .iter()
-            .filter(|rel| record.pointer(&format!("/relationships/{rel}/data")).is_some_and(Value::is_array))
+            .filter(|rel| {
+                record
+                    .pointer(&format!("/relationships/{rel}/data"))
+                    .is_some_and(Value::is_array)
+            })
             .map(String::as_str)
             .collect();
         if !lists.is_empty() {
@@ -64,7 +75,10 @@ impl RecordSink for CsvSink {
         }
         if self.schema.is_none() && !rows.is_empty() {
             let schema = Schema::infer(&rows);
-            write_record(self.out.as_mut(), schema.columns.iter().map(|c| c.name.clone()))?;
+            write_record(
+                self.out.as_mut(),
+                schema.columns.iter().map(|c| c.name.clone()),
+            )?;
             self.schema = Some(schema);
         }
         if let Some(schema) = &self.schema {
@@ -75,18 +89,28 @@ impl RecordSink for CsvSink {
                         "в данных появились поля, которых не было на первой странице; в CSV они не попадут (есть в --format jsonl)",
                     );
                 }
-                let cells = schema.columns.iter().map(|c| row.get(&c.key).map(cell_text).unwrap_or_default());
+                let cells = schema
+                    .columns
+                    .iter()
+                    .map(|c| row.get(&c.key).map(cell_text).unwrap_or_default());
                 write_record(self.out.as_mut(), cells)?;
             }
         }
         self.out.flush().map_err(write_error)?;
-        Ok(PageReport { written: rows.len() as u64, duplicates, commit: Commit::Durable })
+        Ok(PageReport {
+            written: rows.len() as u64,
+            duplicates,
+            commit: Commit::Durable,
+        })
     }
 
     fn finish(&mut self) -> Result<Commit, CliError> {
         if self.schema.is_none() {
             let schema = Schema::infer(&[]);
-            write_record(self.out.as_mut(), schema.columns.iter().map(|c| c.name.clone()))?;
+            write_record(
+                self.out.as_mut(),
+                schema.columns.iter().map(|c| c.name.clone()),
+            )?;
             self.schema = Some(schema);
         }
         self.out.flush().map_err(write_error)?;
@@ -111,7 +135,7 @@ where
 }
 
 fn push_field(line: &mut String, text: &str) {
-    if text.contains(|c| matches!(c, ',' | '"' | '\n' | '\r')) {
+    if text.contains([',', '"', '\n', '\r']) {
         line.push('"');
         line.push_str(&text.replace('"', "\"\""));
         line.push('"');
@@ -137,14 +161,25 @@ mod tests {
 
     fn sink(include: &[&str]) -> (CsvSink, SharedBuf, SharedBuf) {
         let (out, log) = (SharedBuf::default(), SharedBuf::default());
-        let reporter = Rc::new(Reporter::with_writer(false, false, false, false, Box::new(log.clone())));
+        let reporter = Rc::new(Reporter::with_writer(
+            false,
+            false,
+            false,
+            false,
+            Box::new(log.clone()),
+        ));
         let include = include.iter().map(|s| s.to_string()).collect();
-        (CsvSink::new(Box::new(out.clone()), include, reporter), out, log)
+        (
+            CsvSink::new(Box::new(out.clone()), include, reporter),
+            out,
+            log,
+        )
     }
 
     /// Минимальный разбор RFC 4180 для проверки: кавычки, "" и переводы строк внутри поля.
     fn parse_csv(text: &str) -> Vec<Vec<String>> {
-        let (mut rows, mut row, mut field, mut quoted) = (Vec::new(), Vec::new(), String::new(), false);
+        let (mut rows, mut row, mut field, mut quoted) =
+            (Vec::new(), Vec::new(), String::new(), false);
         let mut chars = text.chars().peekable();
         while let Some(c) = chars.next() {
             match (c, quoted) {
@@ -173,13 +208,29 @@ mod tests {
         assert_eq!(rows.len(), 3, "заголовок + 2 записи");
         let header = &rows[0];
         assert_eq!(&header[..2], ["id", "type"]);
-        let col = |name: &str| header.iter().position(|h| h == name).unwrap_or_else(|| panic!("{name}"));
+        let col = |name: &str| {
+            header
+                .iter()
+                .position(|h| h == name)
+                .unwrap_or_else(|| panic!("{name}"))
+        };
         assert_eq!(rows[1][col("author.email")], "author1@example.com");
-        assert_eq!(rows[2][col("author.email")], "", "у второго отзыва автора нет");
-        assert_eq!(rows[1][col("body")], "Текст body 1\nвторая строка, с \"кавычками\"");
+        assert_eq!(
+            rows[2][col("author.email")],
+            "",
+            "у второго отзыва автора нет"
+        );
+        assert_eq!(
+            rows[1][col("body")],
+            "Текст body 1\nвторая строка, с \"кавычками\""
+        );
         assert!(rows.iter().all(|r| r.len() == header.len()));
         assert_eq!(report.written, 2);
-        assert!(log.contents().contains("comments"), "предупреждение про список: {}", log.contents());
+        assert!(
+            log.contents().contains("comments"),
+            "предупреждение про список: {}",
+            log.contents()
+        );
     }
 
     #[test]
@@ -194,9 +245,14 @@ mod tests {
         let (mut s, out, log) = sink(&[]);
         let first = br#"{"data":[{"id":"a","type":"reviews","attributes":{"x":1}}],"meta":{"has_more":true,"cursor":"c"}}"#;
         let second = br#"{"data":[{"id":"b","type":"reviews","attributes":{"x":2,"y":3}},{"id":"c","type":"reviews","attributes":{"z":1}}],"meta":{"has_more":false}}"#;
-        s.write_page(&Page::parse(first.to_vec()).unwrap(), &none_seen()).unwrap();
-        s.write_page(&Page::parse(second.to_vec()).unwrap(), &none_seen()).unwrap();
-        assert_eq!(out.contents(), "id,type,x\na,reviews,1\nb,reviews,2\nc,reviews,\n");
+        s.write_page(&Page::parse(first.to_vec()).unwrap(), &none_seen())
+            .unwrap();
+        s.write_page(&Page::parse(second.to_vec()).unwrap(), &none_seen())
+            .unwrap();
+        assert_eq!(
+            out.contents(),
+            "id,type,x\na,reviews,1\nb,reviews,2\nc,reviews,\n"
+        );
         assert_eq!(log.contents().matches("появились поля").count(), 1);
     }
 }

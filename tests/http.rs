@@ -18,10 +18,27 @@ const NOW: i64 = 1_790_158_269_000;
 fn client(server: &MockServer, max_retries: u32) -> (ApiClient, Rc<FakeClock>, SharedBuf) {
     let clock = Rc::new(FakeClock::new(NOW));
     let log = SharedBuf::default();
-    let reporter = Rc::new(Reporter::with_writer(false, true, false, false, Box::new(log.clone())));
-    let settings = HttpSettings { base_url: server.base_url(), timeout: Duration::from_secs(5), max_retries };
-    let ctx = ErrorContext { token_source: "APLAUT_ACCESS_TOKEN".into(), base_url: server.base_url() };
-    (ApiClient::new(settings, Secret::new(TOKEN), ctx, clock.clone(), reporter), clock, log)
+    let reporter = Rc::new(Reporter::with_writer(
+        false,
+        true,
+        false,
+        false,
+        Box::new(log.clone()),
+    ));
+    let settings = HttpSettings {
+        base_url: server.base_url(),
+        timeout: Duration::from_secs(5),
+        max_retries,
+    };
+    let ctx = ErrorContext {
+        token_source: "APLAUT_ACCESS_TOKEN".into(),
+        base_url: server.base_url(),
+    };
+    (
+        ApiClient::new(settings, Secret::new(TOKEN), ctx, clock.clone(), reporter),
+        clock,
+        log,
+    )
 }
 
 fn ms(d: &Duration) -> u128 {
@@ -33,11 +50,19 @@ fn sends_auth_accept_user_agent_and_encoded_query() {
     let server = MockServer::start(vec![Reply::json(200, "{}")]);
     let (mut api, _, log) = client(&server, 0);
     let cursor = "eyJ2IjoxfQ==+/x";
-    let resp = api.get("/scroll/reviews", &[("cursor", cursor)], Pace::Scroll).unwrap();
+    let resp = api
+        .get("/scroll/reviews", &[("cursor", cursor)], Pace::Scroll)
+        .unwrap();
     assert_eq!(resp.status, 200);
     let req = &server.requests()[0];
-    assert_eq!((req.method.as_str(), req.path.as_str()), ("GET", "/v4/scroll/reviews"));
-    assert_eq!(req.header("authorization"), Some(format!("Bearer {TOKEN}").as_str()));
+    assert_eq!(
+        (req.method.as_str(), req.path.as_str()),
+        ("GET", "/v4/scroll/reviews")
+    );
+    assert_eq!(
+        req.header("authorization"),
+        Some(format!("Bearer {TOKEN}").as_str())
+    );
     assert_eq!(req.header("accept"), Some("application/vnd.api+json"));
     assert!(req.header("user-agent").unwrap().starts_with("aplaut-cli/"));
     assert_eq!(req.query_param("cursor"), Some(cursor));
@@ -83,12 +108,13 @@ fn reset_without_date_uses_local_clock_and_larger_retry_after_wins() {
 
 #[test]
 fn too_long_rate_limit_wait_fails_fast() {
-    let server = MockServer::start(vec![
-        Reply::text(429, "").with_header("Retry-After", "3600"),
-    ]);
+    let server = MockServer::start(vec![Reply::text(429, "").with_header("Retry-After", "3600")]);
     let (mut api, clock, _) = client(&server, 3);
     let err = api.get("/x", &[], Pace::Default).unwrap_err();
-    assert_eq!((err.code.as_str(), err.exit), ("rate_limited", Exit::RateLimited));
+    assert_eq!(
+        (err.code.as_str(), err.exit),
+        ("rate_limited", Exit::RateLimited)
+    );
     assert!(clock.sleeps().is_empty());
 }
 
@@ -106,7 +132,10 @@ fn retries_503_with_retry_after_and_5xx_with_backoff() {
     // короче 500 мс, ещё пауза троттлинга — поэтому проверяем границы, а не позиции.
     let sleeps = clock.sleeps();
     assert_eq!(ms(&sleeps[0]), 2000);
-    assert!(sleeps.len() >= 3 && sleeps.iter().all(|d| ms(d) <= 4000), "{sleeps:?}");
+    assert!(
+        sleeps.len() >= 3 && sleeps.iter().all(|d| ms(d) <= 4000),
+        "{sleeps:?}"
+    );
     assert_eq!(server.requests().len(), 4);
 }
 
@@ -119,18 +148,27 @@ fn gives_up_after_max_retries() {
     ]);
     let (mut api, _, _) = client(&server, 2);
     let err = api.get("/x", &[], Pace::Default).unwrap_err();
-    assert_eq!((err.code.as_str(), err.exit, err.retryable), ("rate_limited", Exit::RateLimited, true));
+    assert_eq!(
+        (err.code.as_str(), err.exit, err.retryable),
+        ("rate_limited", Exit::RateLimited, true)
+    );
     assert_eq!(server.requests().len(), 3);
 }
 
 #[test]
 fn does_not_retry_4xx_and_redacts_token_from_server_text() {
-    let body = format!(r#"{{"errors":{{"status":422,"title":"Invalid query params","details":{{"filter":["bad {TOKEN}"]}}}}}}"#);
+    let body = format!(
+        r#"{{"errors":{{"status":422,"title":"Invalid query params","details":{{"filter":["bad {TOKEN}"]}}}}}}"#
+    );
     let server = MockServer::start(vec![Reply::json(422, body)]);
     let (mut api, clock, _) = client(&server, 6);
     let err = api.get("/x", &[], Pace::Default).unwrap_err();
     assert_eq!(err.code, "validation_failed");
-    assert!(!err.message.contains(TOKEN) && err.message.contains("***"), "{}", err.message);
+    assert!(
+        !err.message.contains(TOKEN) && err.message.contains("***"),
+        "{}",
+        err.message
+    );
     assert_eq!(server.requests().len(), 1);
     assert!(clock.sleeps().is_empty());
 }
@@ -160,7 +198,10 @@ fn network_failure_after_retries_is_retryable_error() {
     let server = MockServer::start(vec![Reply::Hangup, Reply::Hangup]);
     let (mut api, _, _) = client(&server, 1);
     let err = api.get("/x", &[], Pace::Default).unwrap_err();
-    assert_eq!((err.code.as_str(), err.exit, err.retryable), ("network_error", Exit::General, true));
+    assert_eq!(
+        (err.code.as_str(), err.exit, err.retryable),
+        ("network_error", Exit::General, true)
+    );
     assert!(!err.message.contains(TOKEN));
 }
 
@@ -183,7 +224,9 @@ fn paces_scroll_and_default_requests() {
 
 #[test]
 fn redirect_is_not_followed() {
-    let server = MockServer::start(vec![Reply::text(302, "").with_header("Location", "https://example.com/login")]);
+    let server = MockServer::start(vec![
+        Reply::text(302, "").with_header("Location", "https://example.com/login")
+    ]);
     let (mut api, _, _) = client(&server, 3);
     let err = api.get("/x", &[], Pace::Default).unwrap_err();
     assert_eq!(err.code, "unexpected_redirect");

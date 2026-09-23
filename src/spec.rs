@@ -29,14 +29,37 @@ mod tests {
         assert_eq!(
             filters,
             vec![
-                "brand_id", "category_id", "context_type", "created_at", "featured", "lang",
-                "order_number", "origin", "product_group_id", "product_id", "published_at",
-                "rating", "recommended", "state", "syndication_source", "updated_at", "verified",
+                "brand_id",
+                "category_id",
+                "context_type",
+                "created_at",
+                "featured",
+                "lang",
+                "order_number",
+                "origin",
+                "product_group_id",
+                "product_id",
+                "published_at",
+                "rating",
+                "recommended",
+                "state",
+                "syndication_source",
+                "updated_at",
+                "verified",
             ]
         );
-        assert_eq!(reviews.includes, &["author", "product", "comments", "state_changes"]);
-        assert_eq!(scroll_spec("products").unwrap().includes, &["reviews_summary_item"]);
-        assert!(scroll_spec("questions").unwrap().filters.contains(&"has_published_answers"));
+        assert_eq!(
+            reviews.includes,
+            &["author", "product", "comments", "state_changes"]
+        );
+        assert_eq!(
+            scroll_spec("products").unwrap().includes,
+            &["reviews_summary_item"]
+        );
+        assert!(scroll_spec("questions")
+            .unwrap()
+            .filters
+            .contains(&"has_published_answers"));
         assert!(scroll_spec("orders").is_none());
     }
 
@@ -45,7 +68,14 @@ mod tests {
         assert_eq!(SPEC_VERSION, "4.1.0");
         assert_eq!(SCROLL_SORTS, &["updated_at:asc", "created_at:asc"]);
         assert_eq!(SCROLL_SORT_DEFAULT, "updated_at:asc");
-        assert_eq!((SCROLL_PER_PAGE_MIN, SCROLL_PER_PAGE_MAX, SCROLL_PER_PAGE_DEFAULT), (1, 100, 100));
+        assert_eq!(
+            (
+                SCROLL_PER_PAGE_MIN,
+                SCROLL_PER_PAGE_MAX,
+                SCROLL_PER_PAGE_DEFAULT
+            ),
+            (1, 100, 100)
+        );
         assert!(has_operation("GET", "/scroll/{records_type}"));
         assert!(has_operation("PUT", "/reviews/{id}"));
         assert!(!has_operation("GET", "/webhooks"));

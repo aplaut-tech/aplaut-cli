@@ -26,15 +26,33 @@ pub struct ErrorContext {
     pub base_url: String,
 }
 
-pub fn from_response(status: u16, headers: &ResponseHeaders, body: &[u8], ctx: &ErrorContext) -> CliError {
+pub fn from_response(
+    status: u16,
+    headers: &ResponseHeaders,
+    body: &[u8],
+    ctx: &ErrorContext,
+) -> CliError {
     let parsed = ParsedBody::parse(body);
     let err = match status {
         401 => unauthorized(headers, ctx),
-        403 => CliError::new(Exit::Auth, "forbidden", parsed.message_or("доступ запрещён"))
-            .with_hint("у токена нет доступа к ресурсу: проверьте scope приложения (Platform API) в ЛК"),
-        404 => CliError::new(Exit::NotFound, "not_found", parsed.message_or("объект не найден")),
+        403 => CliError::new(
+            Exit::Auth,
+            "forbidden",
+            parsed.message_or("доступ запрещён"),
+        )
+        .with_hint(
+            "у токена нет доступа к ресурсу: проверьте scope приложения (Platform API) в ЛК",
+        ),
+        404 => CliError::new(
+            Exit::NotFound,
+            "not_found",
+            parsed.message_or("объект не найден"),
+        ),
         400 => bad_request(&parsed),
-        422 => CliError::general("validation_failed", parsed.message_or("сервер отклонил параметры запроса")),
+        422 => CliError::general(
+            "validation_failed",
+            parsed.message_or("сервер отклонил параметры запроса"),
+        ),
         429 => {
             let when = headers
                 .rate_limit_reset
@@ -45,16 +63,27 @@ pub fn from_response(status: u16, headers: &ResponseHeaders, body: &[u8], ctx: &
                 .retryable(true)
                 .with_hint(format!("{when}повторите позже и не запускайте параллельно несколько выгрузок с одним ключом"))
         }
-        500..=599 => CliError::general("server_error", parsed.message_or(format!("сервер вернул {status}"))).retryable(true),
+        500..=599 => CliError::general(
+            "server_error",
+            parsed.message_or(format!("сервер вернул {status}")),
+        )
+        .retryable(true),
         300..=399 => CliError::general(
             "unexpected_redirect",
             format!(
                 "сервер вернул редирект {status}{}",
-                headers.location.as_deref().map(|l| format!(" на {l}")).unwrap_or_default()
+                headers
+                    .location
+                    .as_deref()
+                    .map(|l| format!(" на {l}"))
+                    .unwrap_or_default()
             ),
         )
         .with_hint("проверьте --base-url: API не перенаправляет запросы"),
-        _ => CliError::general(format!("http_{status}"), parsed.message_or(format!("неожиданный ответ {status}"))),
+        _ => CliError::general(
+            format!("http_{status}"),
+            parsed.message_or(format!("неожиданный ответ {status}")),
+        ),
     };
     let err = match (&parsed.field, &err.field) {
         (Some(field), None) => err.with_field(field.clone()),
@@ -101,15 +130,24 @@ impl ParsedBody {
             _ => doc.clone(),
         };
         let mut parsed = ParsedBody {
-            title: error.get("title").and_then(Value::as_str).map(str::to_string),
-            readme: error.pointer("/readme/link").and_then(Value::as_str).map(str::to_string),
+            title: error
+                .get("title")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            readme: error
+                .pointer("/readme/link")
+                .and_then(Value::as_str)
+                .map(str::to_string),
             ..ParsedBody::default()
         };
         match error.get("details").or_else(|| error.get("detail")) {
             Some(Value::Object(map)) => {
                 for (key, value) in map {
                     let texts: Vec<String> = match value {
-                        Value::Array(items) => items.iter().filter_map(|x| x.as_str().map(str::to_string)).collect(),
+                        Value::Array(items) => items
+                            .iter()
+                            .filter_map(|x| x.as_str().map(str::to_string))
+                            .collect(),
                         Value::String(s) => vec![s.clone()],
                         _ => Vec::new(),
                     };
@@ -117,13 +155,17 @@ impl ParsedBody {
                         parsed.field = Some(key.clone());
                     }
                     for text in texts {
-                        parsed.messages.push(if key == "message" { text } else { format!("{key}: {text}") });
+                        parsed.messages.push(if key == "message" {
+                            text
+                        } else {
+                            format!("{key}: {text}")
+                        });
                     }
                 }
             }
-            Some(Value::Array(items)) => {
-                parsed.messages.extend(items.iter().filter_map(|x| x.as_str().map(str::to_string)))
-            }
+            Some(Value::Array(items)) => parsed
+                .messages
+                .extend(items.iter().filter_map(|x| x.as_str().map(str::to_string))),
             Some(Value::String(s)) => parsed.messages.push(s.clone()),
             _ => {}
         }
@@ -143,8 +185,11 @@ impl ParsedBody {
 fn bad_request(parsed: &ParsedBody) -> CliError {
     let text = parsed.messages.join("; ");
     if text.contains("Invalid cursor") {
-        CliError::general("invalid_cursor", format!("сервер не принял курсор обхода: {text}"))
-            .with_hint("курсор устарел или повреждён: удалите файл стейта и начните обход заново")
+        CliError::general(
+            "invalid_cursor",
+            format!("сервер не принял курсор обхода: {text}"),
+        )
+        .with_hint("курсор устарел или повреждён: удалите файл стейта и начните обход заново")
     } else if text.contains("Cursor was issued for a different query") {
         CliError::general("cursor_mismatch", format!("курсор выдан для другого запроса: {text}"))
             .with_hint("параметры обхода не совпадают с курсором: удалите файл стейта или передайте исходные параметры")
@@ -162,7 +207,12 @@ fn unauthorized(headers: &ResponseHeaders, ctx: &ErrorContext) -> CliError {
     let message = description
         .map(|d| format!("токен отклонён: {d}"))
         .unwrap_or_else(|| "токен отклонён сервером (401)".to_string());
-    CliError::new(Exit::Auth, code.unwrap_or_else(|| "unauthorized".into()), message).with_hint(format!(
+    CliError::new(
+        Exit::Auth,
+        code.unwrap_or_else(|| "unauthorized".into()),
+        message,
+    )
+    .with_hint(format!(
         "токен из {}, base URL {}: токен отозван, истёк или выпущен для другого окружения",
         ctx.token_source, ctx.base_url
     ))
@@ -192,7 +242,12 @@ fn auth_params(header: &str) -> Vec<(String, String)> {
 
 fn push_param(params: &mut Vec<(String, String)>, part: &str) {
     if let Some((key, value)) = part.split_once('=') {
-        let key = key.trim().rsplit(' ').next().unwrap_or_default().to_string();
+        let key = key
+            .trim()
+            .rsplit(' ')
+            .next()
+            .unwrap_or_default()
+            .to_string();
         params.push((key, value.trim().trim_matches('"').to_string()));
     }
 }
@@ -202,21 +257,37 @@ mod tests {
     use super::*;
 
     fn ctx() -> ErrorContext {
-        ErrorContext { token_source: "APLAUT_ACCESS_TOKEN".into(), base_url: "https://api.staging.example/v4".into() }
+        ErrorContext {
+            token_source: "APLAUT_ACCESS_TOKEN".into(),
+            base_url: "https://api.staging.example/v4".into(),
+        }
     }
 
     fn headers() -> ResponseHeaders {
-        ResponseHeaders { request_id: Some("req-42".into()), ..ResponseHeaders::default() }
+        ResponseHeaders {
+            request_id: Some("req-42".into()),
+            ..ResponseHeaders::default()
+        }
     }
 
     #[test]
     fn observed_422_gives_field_and_readme_hint() {
         let body = br#"{"errors":{"status":422,"title":"Invalid query params","details":{"filter":["unknown field 'foo', allowed: brand_id, category_id"]},"readme":{"link":"https://aplaut.com/docs/api-references/platform/"}}}"#;
         let err = from_response(422, &headers(), body, &ctx());
-        assert_eq!((err.code.as_str(), err.exit), ("validation_failed", Exit::General));
+        assert_eq!(
+            (err.code.as_str(), err.exit),
+            ("validation_failed", Exit::General)
+        );
         assert_eq!(err.field.as_deref(), Some("filter"));
-        assert!(err.message.contains("unknown field 'foo'"), "{}", err.message);
-        assert!(err.hint.unwrap().contains("https://aplaut.com/docs/api-references/platform/"));
+        assert!(
+            err.message.contains("unknown field 'foo'"),
+            "{}",
+            err.message
+        );
+        assert!(err
+            .hint
+            .unwrap()
+            .contains("https://aplaut.com/docs/api-references/platform/"));
         assert_eq!(err.request_id.as_deref(), Some("req-42"));
         assert!(!err.retryable);
     }
@@ -225,7 +296,10 @@ mod tests {
     fn observed_400_cursor_errors_have_own_codes() {
         let invalid = br#"{"errors":{"status":400,"title":"Bad request","details":{"message":"Invalid cursor"}}}"#;
         let mismatch = br#"{"errors":{"status":400,"title":"Bad request","details":{"message":"Cursor was issued for a different query"}}}"#;
-        assert_eq!(from_response(400, &headers(), invalid, &ctx()).code, "invalid_cursor");
+        assert_eq!(
+            from_response(400, &headers(), invalid, &ctx()).code,
+            "invalid_cursor"
+        );
         let err = from_response(400, &headers(), mismatch, &ctx());
         assert_eq!(err.code, "cursor_mismatch");
         assert!(err.hint.unwrap().contains("стейт"));
@@ -233,7 +307,8 @@ mod tests {
 
     #[test]
     fn spec_shape_is_also_understood() {
-        let body = br#"{"status":"422","title":"Validation failed","details":["rating must be 1..5"]}"#;
+        let body =
+            br#"{"status":"422","title":"Validation failed","details":["rating must be 1..5"]}"#;
         let err = from_response(422, &headers(), body, &ctx());
         assert!(err.message.contains("rating must be 1..5"));
         let array = br#"{"errors":[{"status":"404","title":"Not found"}]}"#;
@@ -251,7 +326,9 @@ mod tests {
         assert_eq!((err.code.as_str(), err.exit), ("invalid_token", Exit::Auth));
         assert!(err.message.contains("The access token is invalid"));
         let hint = err.hint.unwrap();
-        assert!(hint.contains("APLAUT_ACCESS_TOKEN") && hint.contains("https://api.staging.example/v4"));
+        assert!(
+            hint.contains("APLAUT_ACCESS_TOKEN") && hint.contains("https://api.staging.example/v4")
+        );
     }
 
     #[test]
@@ -268,18 +345,45 @@ mod tests {
 
     #[test]
     fn www_authenticate_quoted_commas() {
-        let (e, d) = parse_www_authenticate(r#"Bearer realm="x", error="invalid_token", error_description="expired, sorry""#);
-        assert_eq!((e.as_deref(), d.as_deref()), (Some("invalid_token"), Some("expired, sorry")));
+        let (e, d) = parse_www_authenticate(
+            r#"Bearer realm="x", error="invalid_token", error_description="expired, sorry""#,
+        );
+        assert_eq!(
+            (e.as_deref(), d.as_deref()),
+            (Some("invalid_token"), Some("expired, sorry"))
+        );
     }
 
     #[test]
     fn non_json_and_status_classes() {
-        assert_eq!(from_response(503, &headers(), b"<html>", &ctx()).code, "server_error");
+        assert_eq!(
+            from_response(503, &headers(), b"<html>", &ctx()).code,
+            "server_error"
+        );
         assert!(from_response(503, &headers(), b"", &ctx()).retryable);
-        let err = from_response(429, &ResponseHeaders { rate_limit_reset: Some("2026-09-23 10:12:00 +0000".into()), ..headers() }, b"Throttled\n", &ctx());
-        assert_eq!((err.code.as_str(), err.exit), ("rate_limited", Exit::RateLimited));
+        let err = from_response(
+            429,
+            &ResponseHeaders {
+                rate_limit_reset: Some("2026-09-23 10:12:00 +0000".into()),
+                ..headers()
+            },
+            b"Throttled\n",
+            &ctx(),
+        );
+        assert_eq!(
+            (err.code.as_str(), err.exit),
+            ("rate_limited", Exit::RateLimited)
+        );
         assert!(err.hint.unwrap().contains("2026-09-23 10:12:00 +0000"));
-        let redirect = from_response(302, &ResponseHeaders { location: Some("https://x/login".into()), ..headers() }, b"", &ctx());
+        let redirect = from_response(
+            302,
+            &ResponseHeaders {
+                location: Some("https://x/login".into()),
+                ..headers()
+            },
+            b"",
+            &ctx(),
+        );
         assert_eq!(redirect.code, "unexpected_redirect");
         assert_eq!(from_response(403, &headers(), b"", &ctx()).exit, Exit::Auth);
     }

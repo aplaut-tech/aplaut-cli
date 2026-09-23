@@ -26,11 +26,17 @@ fn main() {
     let params = &spec["components"]["parameters"];
     let records_types = enum_values(&params["scrollRecordsType"]["schema"], "scrollRecordsType");
     let filters = markdown_table(
-        text(&params["scrollFilter"]["description"], "scrollFilter.description"),
+        text(
+            &params["scrollFilter"]["description"],
+            "scrollFilter.description",
+        ),
         "scrollFilter",
     );
     let includes = markdown_table(
-        text(&params["scrollInclude"]["description"], "scrollInclude.description"),
+        text(
+            &params["scrollInclude"]["description"],
+            "scrollInclude.description",
+        ),
         "scrollInclude",
     );
     let sort = &params["scrollSort"]["schema"];
