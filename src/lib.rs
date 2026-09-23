@@ -1,7 +1,9 @@
 //! aplaut — консольный клиент Aplaut Platform API.
 
+pub mod auth;
 pub mod cli;
 pub mod clock;
+pub mod config;
 pub mod error;
 pub mod filter;
 pub mod fsutil;
