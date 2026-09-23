@@ -1,12 +1,17 @@
 mod support;
 
+use std::cell::RefCell;
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::time::Duration;
 
 use aplaut_cli::auth::EnvSnapshot;
-use aplaut_cli::commands::profile::{edit_config, EditOutcome};
+use aplaut_cli::commands::profile::{edit_config, EditOutcome, MIN_EDITOR_SESSION};
 use aplaut_cli::config::Paths;
+use aplaut_cli::term::Reporter;
 use support::{aplaut, TempDir};
 
 fn config_text(home: &Path) -> String {
@@ -303,7 +308,12 @@ fn unknown_config_key_is_rejected_instead_of_silently_using_prod() {
 
 /// Редактор для тестов: shell-скрипт; `$1` — редактируемый файл, `$0` — сам скрипт.
 fn editor_script(dir: &Path, body: &str) -> String {
-    let script = dir.join("editor.sh");
+    named_editor(dir, "editor.sh", body)
+}
+
+/// Скрипт-редактор с заданным именем: aplaut узнаёт GUI-редакторы по имени программы.
+fn named_editor(dir: &Path, name: &str, body: &str) -> String {
+    let script = dir.join(name);
     fs::write(&script, format!("#!/bin/sh\n{body}\n")).unwrap();
     fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
     script.display().to_string()
@@ -336,15 +346,121 @@ fn never(_: &str) -> bool {
     false
 }
 
+fn silent() -> Reporter {
+    Reporter::with_writer(false, false, false, false, Box::new(std::io::sink()))
+}
+
+/// stderr для тестов: к каждой записи — был ли уже запущен редактор (он создаёт файл-метку).
+struct Timeline {
+    marker: PathBuf,
+    writes: Rc<RefCell<Vec<(String, bool)>>>,
+}
+
+impl Write for Timeline {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let text = String::from_utf8_lossy(buf).into_owned();
+        self.writes.borrow_mut().push((text, self.marker.exists()));
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Как git: GUI-редактор с ожиданием держит терминал, пока открыта вкладка, — без строки
+/// «жду» кажется, что aplaut завис. Строка появляется до запуска редактора и стирается после.
+#[test]
+fn edit_says_it_waits_for_the_editor_and_then_clears_the_line() {
+    let home = TempDir::new("edit-hint");
+    let p = paths(home.path());
+    let marker = home.path().join("editor-ran");
+    let writes = Rc::new(RefCell::new(Vec::new()));
+    let stderr = Timeline {
+        marker: marker.clone(),
+        writes: writes.clone(),
+    };
+    let tty = Reporter::with_writer(false, false, true, false, Box::new(stderr));
+    let body = format!("touch '{}'\n{}", marker.display(), append("[profiles.a]"));
+    let editor = editor_script(home.path(), &body);
+    edit_config(&p, &editor, &tty, &mut never).unwrap();
+    assert_eq!(
+        *writes.borrow(),
+        vec![
+            (
+                "\rЖду, пока вы закроете файл в редакторе…\x1b[K".to_string(),
+                false
+            ),
+            ("\r\x1b[K".to_string(), true),
+        ]
+    );
+}
+
 #[test]
 fn edit_without_changes_writes_nothing() {
     let home = TempDir::new("edit-unchanged");
     let p = paths(home.path());
+    // Человек посмотрел и закрыл — дольше, чем возвращается GUI-редактор без ожидания.
+    let looked = MIN_EDITOR_SESSION + Duration::from_millis(200);
+    let editor = editor_script(home.path(), &format!("sleep {}", looked.as_secs_f64()));
     assert_eq!(
-        edit_config(&p, "true", &mut never).unwrap(),
+        edit_config(&p, &editor, &silent(), &mut never).unwrap(),
         EditOutcome::Unchanged
     );
     assert!(!p.config.exists(), "шаблон без правок не сохраняется");
+    assert!(leftovers(&p).is_empty());
+}
+
+#[test]
+fn edit_reports_editor_that_returned_immediately_without_changes() {
+    let home = TempDir::new("edit-instant");
+    let p = paths(home.path());
+    let err = edit_config(&p, "true", &silent(), &mut never).unwrap_err();
+    assert_eq!(err.code, "editor_returned_immediately");
+    assert!(err.message.contains("«true»"), "{}", err.message);
+    let hint = err.hint.unwrap();
+    // VISUAL главнее EDITOR: совет «EDITOR=vi» не помог бы при заданном VISUAL.
+    assert!(
+        hint.contains("--wait") && hint.contains("VISUAL=vi aplaut profile edit"),
+        "{hint}"
+    );
+    assert!(!p.config.exists());
+    assert!(leftovers(&p).is_empty());
+}
+
+/// Редактор сохранил файл не в UTF-8 (например, в CP1251): прочесть правки нельзя, но и удалять
+/// их нельзя — копия остаётся, путь к ней в подсказке.
+#[test]
+fn edit_keeps_the_copy_with_edits_it_cannot_read_back() {
+    let home = TempDir::new("edit-unreadable");
+    let p = paths(home.path());
+    let editor = editor_script(home.path(), "printf '\\317\\360\\356\\344' >> \"$1\"");
+    let err = edit_config(&p, &editor, &silent(), &mut never).unwrap_err();
+    assert_eq!(err.code, "io_error");
+    let copy = leftovers(&p);
+    assert_eq!(copy.len(), 1, "копия с правками осталась");
+    let hint = err.hint.unwrap_or_default();
+    assert!(hint.contains(&copy[0]), "{hint}");
+}
+
+#[test]
+fn edit_reopened_editor_that_returns_immediately_is_reported_not_asked_again() {
+    let home = TempDir::new("edit-instant-reopen");
+    let p = paths(home.path());
+    // Первый сеанс ломает файл, повторный возвращается сразу, ничего не тронув.
+    let body = format!(
+        "[ -f \"$0.done\" ] && exit 0\ntouch \"$0.done\"\n{}",
+        append("[profiles.x")
+    );
+    let editor = editor_script(home.path(), &body);
+    let mut asked = 0;
+    let mut ask = |_: &str| {
+        asked += 1;
+        asked < 2
+    };
+    let err = edit_config(&p, &editor, &silent(), &mut ask).unwrap_err();
+    assert_eq!(err.code, "editor_returned_immediately");
+    assert_eq!(asked, 1, "после мгновенного возврата вопрос не повторяется");
     assert!(leftovers(&p).is_empty());
 }
 
@@ -356,7 +472,7 @@ fn edit_saves_valid_changes_with_summary() {
         home.path(),
         &append("[profiles.staging]\nbase_url = \"https://api.staging.example/v4\""),
     );
-    let outcome = edit_config(&p, &editor, &mut never).unwrap();
+    let outcome = edit_config(&p, &editor, &silent(), &mut never).unwrap();
     assert_eq!(
         outcome,
         EditOutcome::Saved {
@@ -395,7 +511,7 @@ fn edit_invalid_file_offers_reopen_and_keeps_original_when_declined() {
         asked.push(q.to_string());
         asked.len() < 2
     };
-    let err = edit_config(&p, &editor, &mut ask).unwrap_err();
+    let err = edit_config(&p, &editor, &silent(), &mut ask).unwrap_err();
     assert_eq!(err.code, "config_invalid");
     assert!(err.message.contains("строка"), "{}", err.message);
     assert_eq!(asked.len(), 2, "после каждой неудачной проверки — вопрос");
@@ -426,7 +542,7 @@ fn edit_reopen_lets_user_fix_the_mistake() {
     );
     let editor = editor_script(home.path(), &body);
     let mut always = |_: &str| true;
-    let outcome = edit_config(&p, &editor, &mut always).unwrap();
+    let outcome = edit_config(&p, &editor, &silent(), &mut always).unwrap();
     assert_eq!(
         outcome,
         EditOutcome::Saved {
@@ -448,7 +564,7 @@ fn edit_does_not_overwrite_a_concurrent_change_and_keeps_the_copy() {
         append("[profiles.c]")
     );
     let editor = editor_script(home.path(), &body);
-    let err = edit_config(&p, &editor, &mut never).unwrap_err();
+    let err = edit_config(&p, &editor, &silent(), &mut never).unwrap_err();
     assert_eq!(err.code, "config_changed_during_edit");
     assert_eq!(
         fs::read_to_string(&p.config).unwrap(),
@@ -473,7 +589,7 @@ fn edit_summary_reports_changed_and_removed_profiles() {
     .unwrap();
     let body = "printf '[profiles.a]\\nbase_url = \"https://a2.example/v4\"\\n' > \"$1\"";
     let editor = editor_script(home.path(), body);
-    let outcome = edit_config(&p, &editor, &mut never).unwrap();
+    let outcome = edit_config(&p, &editor, &silent(), &mut never).unwrap();
     assert_eq!(
         outcome,
         EditOutcome::Saved {
@@ -487,11 +603,36 @@ fn edit_summary_reports_changed_and_removed_profiles() {
     );
 }
 
+/// Как VS Code: без `--wait` передаёт файл окну и сразу выходит — aplaut принял бы это за выход
+/// без правок и удалил копию, а окно открыло бы уже пустой файл. С `--wait` ждёт, пока человек
+/// поправит файл и закроет вкладку.
+#[test]
+fn edit_makes_gui_editor_wait_for_the_file_to_close() {
+    let home = TempDir::new("edit-gui");
+    let p = paths(home.path());
+    let code = named_editor(
+        home.path(),
+        "code",
+        &format!(
+            "[ \"$1\" = --wait ] || exit 0\nshift\n{}",
+            append("[profiles.gui]")
+        ),
+    );
+    let outcome = edit_config(&p, &code, &silent(), &mut never).unwrap();
+    assert_eq!(
+        outcome,
+        EditOutcome::Saved {
+            profiles: 1,
+            changes: vec!["gui: добавлен, base_url прод по умолчанию".into()]
+        }
+    );
+}
+
 #[test]
 fn edit_propagates_editor_failure_and_cleans_up() {
     let home = TempDir::new("edit-fail");
     let p = paths(home.path());
-    let err = edit_config(&p, "false", &mut never).unwrap_err();
+    let err = edit_config(&p, "false", &silent(), &mut never).unwrap_err();
     assert_eq!(err.code, "editor_failed");
     assert!(leftovers(&p).is_empty());
 }

@@ -4,6 +4,7 @@
 use std::collections::BTreeSet;
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -13,6 +14,7 @@ use crate::cli::ProfileVerb;
 use crate::config::{self, ConfigFile, CredentialsFile, Paths, ProfileConfig};
 use crate::error::{CliError, Exit};
 use crate::fsutil;
+use crate::term::Reporter;
 
 #[derive(Debug, Serialize)]
 struct ProfileView {
@@ -34,6 +36,10 @@ pub fn run(verb: ProfileVerb, ctx: &Ctx) -> Result<(), CliError> {
     }
 }
 
+/// Быстрее человек файл не поправит: возврат без правок раньше этого срока — признак
+/// GUI-редактора, который передал файл окну и не ждёт.
+pub const MIN_EDITOR_SESSION: Duration = Duration::from_secs(1);
+
 /// Итог `profile edit`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditOutcome {
@@ -50,11 +56,13 @@ pub enum EditOutcome {
 pub fn edit_config(
     paths: &Paths,
     editor: &str,
+    reporter: &Reporter,
     ask: &mut dyn FnMut(&str) -> bool,
 ) -> Result<EditOutcome, CliError> {
     let io_err = |what: &str, e: &std::io::Error| {
         CliError::io(&format!("{what} {}", paths.config.display()), e)
     };
+    let editor = &with_wait_flag(editor);
     fsutil::ensure_private_dir(&paths.dir).map_err(|e| io_err("каталог для", &e))?;
     let original = read_optional(&paths.config).map_err(|e| io_err("чтение", &e))?;
     let old_config = match &original {
@@ -72,12 +80,26 @@ pub fn edit_config(
     let cleanup = |copy: &std::path::Path| {
         let _ = std::fs::remove_file(copy);
     };
+    let mut before = start_text.clone();
     loop {
-        if let Err(err) = run_editor(editor, &copy) {
+        let elapsed = match editor_session(editor, &copy, reporter) {
+            Ok(elapsed) => elapsed,
+            Err(err) => {
+                cleanup(&copy);
+                return Err(err);
+            }
+        };
+        // Нечитаемую копию (например, сохранённую не в UTF-8) не удаляем: в ней правки человека.
+        let edited = std::fs::read_to_string(&copy).map_err(|e| {
+            CliError::io(&format!("чтение правок {}", copy.display()), &e).with_hint(format!(
+                "config.toml не изменён; правки остались в {}: перенесите их и удалите копию",
+                copy.display()
+            ))
+        })?;
+        if edited == before && elapsed < MIN_EDITOR_SESSION {
             cleanup(&copy);
-            return Err(err);
+            return Err(returned_immediately(editor, elapsed));
         }
-        let edited = std::fs::read_to_string(&copy).map_err(|e| io_err("чтение правок", &e))?;
         if edited == start_text {
             cleanup(&copy);
             return Ok(EditOutcome::Unchanged);
@@ -86,6 +108,7 @@ pub fn edit_config(
             Ok(config) => config,
             Err(err) => {
                 if ask(&format!("{}\nОткрыть снова? [Y/n] ", err.message)) {
+                    before = edited;
                     continue;
                 }
                 cleanup(&copy);
@@ -121,6 +144,78 @@ fn read_optional(path: &std::path::Path) -> std::io::Result<Option<String>> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e),
     }
+}
+
+/// GUI-редакторы, которые без флага передают файл окну и сразу возвращают управление: правка
+/// ещё не началась, а aplaut уже прочёл бы копию. Поля: программы, флаг ожидания, его короткая форма.
+const WAIT_FLAGS: &[(&[&str], &str, &str)] = &[
+    (
+        &[
+            "code",
+            "code-insiders",
+            "codium",
+            "cursor",
+            "windsurf",
+            "zed",
+            "zeditor",
+            "subl",
+        ],
+        "--wait",
+        "-w",
+    ),
+    (&["gvim"], "--nofork", "-f"),
+    (&["kate"], "--block", "-b"),
+];
+
+/// Команда редактора, которая ждёт закрытия файла: знакомым GUI-редакторам — флаг ожидания,
+/// если его нет. Остальные команды — как есть.
+fn with_wait_flag(editor: &str) -> String {
+    let mut words = editor.split_whitespace();
+    let program = words.next().unwrap_or_default();
+    let name = program.rsplit('/').next().unwrap_or(program);
+    match WAIT_FLAGS
+        .iter()
+        .find(|(names, _, _)| names.contains(&name))
+    {
+        Some((_, long, short)) if !words.any(|w| w == *long || w == *short) => {
+            format!("{editor} {long}")
+        }
+        _ => editor.to_string(),
+    }
+}
+
+/// Один сеанс редактора; возвращает его длительность. Как git: GUI-редактор с ожиданием держит
+/// терминал, пока открыта вкладка, — без строки «жду» кажется, что aplaut завис.
+fn editor_session(
+    editor: &str,
+    copy: &std::path::Path,
+    reporter: &Reporter,
+) -> Result<Duration, CliError> {
+    reporter.progress("Жду, пока вы закроете файл в редакторе…");
+    let started = Instant::now();
+    let status = run_editor(editor, copy);
+    let elapsed = started.elapsed();
+    reporter.clear_progress();
+    status.map(|()| elapsed)
+}
+
+/// Мгновенный возврат без правок — не решение человека: копию сейчас удалят, и окно
+/// GUI-редактора откроет пустой файл.
+fn returned_immediately(editor: &str, elapsed: Duration) -> CliError {
+    CliError::general(
+        "editor_returned_immediately",
+        format!(
+            "редактор «{editor}» вернул управление через {} мс, и файл не изменился. Если он \
+             открыл файл в отдельном окне, то не ждёт, пока вы закончите: правки в том окне \
+             в config.toml не попадут",
+            elapsed.as_millis()
+        ),
+    )
+    .with_hint(
+        "config.toml не изменён. Задайте в VISUAL (он главнее EDITOR) команду, которая ждёт \
+         закрытия файла — у GUI-редакторов обычно флаг вроде --wait, — или терминальный \
+         редактор: VISUAL=vi aplaut profile edit",
+    )
 }
 
 /// Через `sh -c`, как git: редактор может быть с аргументами — EDITOR="code --wait".
@@ -323,10 +418,8 @@ fn edit(ctx: &Ctx) -> Result<(), CliError> {
     let paths = Paths::resolve(&ctx.env)?;
     let editor = ctx.env.editor.clone().unwrap_or_else(|| "vi".to_string());
     let mut ask = |question: &str| ask_yes(question, true);
-    match edit_config(&paths, &editor, &mut ask)? {
-        EditOutcome::Unchanged => ctx.reporter.info(
-            "Без изменений. Если редактор открылся в отдельном окне, добавьте ожидание: EDITOR=\"code --wait\"",
-        ),
+    match edit_config(&paths, &editor, &ctx.reporter, &mut ask)? {
+        EditOutcome::Unchanged => ctx.reporter.info("Без изменений."),
         EditOutcome::Saved { profiles, changes } => {
             let summary = if changes.is_empty() {
                 "изменены только комментарии или форматирование".to_string()
@@ -441,4 +534,38 @@ fn print_json<T: Serialize + ?Sized>(value: &T) -> Result<(), CliError> {
     let mut out = io::stdout().lock();
     serde_json::to_writer(&mut out, value).map_err(|e| crate::output::write_error(e.into()))?;
     writeln!(out).map_err(crate::output::write_error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gui_editors_get_their_wait_flag() {
+        assert_eq!(with_wait_flag("code"), "code --wait");
+        assert_eq!(
+            with_wait_flag("/usr/bin/code -n"),
+            "/usr/bin/code -n --wait"
+        );
+        assert_eq!(with_wait_flag("subl"), "subl --wait");
+        assert_eq!(with_wait_flag("zeditor"), "zeditor --wait");
+        assert_eq!(with_wait_flag("gvim"), "gvim --nofork");
+        assert_eq!(with_wait_flag("kate"), "kate --block");
+    }
+
+    #[test]
+    fn editor_that_already_waits_or_is_unknown_is_left_alone() {
+        for editor in [
+            "code --wait",
+            "code -w",
+            "gvim -f",
+            "kate -b",
+            "vim",
+            "nano -w",
+            "codex",
+            "",
+        ] {
+            assert_eq!(with_wait_flag(editor), editor);
+        }
+    }
 }
