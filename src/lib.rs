@@ -1,10 +1,12 @@
 //! aplaut — консольный клиент Aplaut Platform API.
 
 pub mod cli;
+pub mod clock;
 pub mod error;
 pub mod fsutil;
 pub mod secret;
 pub mod term;
+pub mod time;
 
 use clap::Parser;
 
