@@ -22,6 +22,8 @@ pub struct EnvSnapshot {
     pub base_url: Option<String>,
     pub xdg_config_home: Option<PathBuf>,
     pub home: Option<PathBuf>,
+    /// `$VISUAL`, иначе `$EDITOR` — для `profile edit`.
+    pub editor: Option<String>,
     pub term: TermEnv,
 }
 
@@ -35,6 +37,7 @@ impl EnvSnapshot {
             base_url: var("APLAUT_BASE_URL"),
             xdg_config_home: var("XDG_CONFIG_HOME").map(PathBuf::from),
             home: var("HOME").map(PathBuf::from),
+            editor: var("VISUAL").or_else(|| var("EDITOR")),
             term: TermEnv::capture(),
         }
     }

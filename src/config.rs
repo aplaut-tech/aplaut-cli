@@ -43,13 +43,16 @@ impl Paths {
     }
 }
 
+/// Неизвестные ключи — ошибка: опечатка вроде `base-url` иначе молча отправила бы запросы на прод.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConfigFile {
     #[serde(default)]
     pub profiles: BTreeMap<String, ProfileConfig>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProfileConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
@@ -74,6 +77,12 @@ impl fmt::Debug for ProfileCredentials {
 
 pub fn load_config(paths: &Paths) -> Result<ConfigFile, CliError> {
     load_toml(&paths.config, false).map_err(|message| CliError::general("config_invalid", message))
+}
+
+/// Разбор текста конфига теми же правилами, что `load_config` (для проверки правок до записи).
+/// `path` — только для сообщений об ошибке.
+pub fn parse_config(text: &str, path: &Path) -> Result<ConfigFile, CliError> {
+    parse_toml(text, path, false).map_err(|message| CliError::general("config_invalid", message))
 }
 
 pub fn load_credentials(paths: &Paths, reporter: &Reporter) -> Result<CredentialsFile, CliError> {
@@ -104,7 +113,11 @@ fn load_toml<T: DeserializeOwned + Default>(path: &Path, secret: bool) -> Result
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(T::default()),
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
-    toml::from_str(&text).map_err(|e| {
+    parse_toml(&text, path, secret)
+}
+
+fn parse_toml<T: DeserializeOwned>(text: &str, path: &Path, secret: bool) -> Result<T, String> {
+    toml::from_str(text).map_err(|e| {
         let line = e
             .span()
             .map(|span| format!(" (строка {})", text[..span.start].matches('\n').count() + 1))

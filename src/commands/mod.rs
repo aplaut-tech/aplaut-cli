@@ -1,12 +1,13 @@
 //! Клей между деревом clap и алгоритмами: сборка зависимостей и сообщения пользователю.
 
 pub mod auth;
+pub mod profile;
 pub mod records;
 
 use std::rc::Rc;
 
 use crate::auth::EnvSnapshot;
-use crate::cli::{AuthVerb, Command, GlobalArgs, RecordsVerb};
+use crate::cli::{AuthVerb, Command, GlobalArgs, ProfileVerb, RecordsVerb};
 use crate::clock::Clock;
 use crate::error::CliError;
 use crate::resources;
@@ -25,6 +26,7 @@ pub fn dispatch(command: Command, ctx: &Ctx) -> Result<(), CliError> {
         Command::Products { verb } => records::run(&resources::PRODUCTS, verb, ctx),
         Command::Questions { verb } => records::run(&resources::QUESTIONS, verb, ctx),
         Command::Auth { verb } => auth::run(verb, ctx),
+        Command::Profile { verb } => profile::run(verb, ctx),
     }
 }
 
@@ -39,6 +41,16 @@ pub fn command_name(command: &Command) -> String {
             match verb {
                 AuthVerb::Login => "login",
                 AuthVerb::Logout => "logout",
+            },
+        ),
+        Command::Profile { verb } => (
+            "profile",
+            match verb {
+                ProfileVerb::List(_) => "list",
+                ProfileVerb::Get { .. } => "get",
+                ProfileVerb::Set { .. } => "set",
+                ProfileVerb::Delete { .. } => "delete",
+                ProfileVerb::Edit => "edit",
             },
         ),
     };

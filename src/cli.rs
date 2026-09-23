@@ -134,6 +134,12 @@ pub enum Command {
         #[command(subcommand)]
         verb: AuthVerb,
     },
+    /// Профили: base URL и наличие токена (сам токен задаёт `auth login`)
+    #[command(arg_required_else_help = true)]
+    Profile {
+        #[command(subcommand)]
+        verb: ProfileVerb,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -166,6 +172,41 @@ pub struct ScrollArgs {
     /// Формат вывода
     #[arg(long, value_name = "FORMAT", default_value = "raw", value_parser = format_parser())]
     pub format: Format,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProfileVerb {
+    /// Показать профили: base URL, есть ли токен, какой активен
+    List(ProfileFormatArgs),
+    /// Показать один профиль
+    Get {
+        /// Имя профиля
+        name: String,
+        #[command(flatten)]
+        format: ProfileFormatArgs,
+    },
+    /// Создать или изменить профиль: `--base-url URL` (или `none` — прод по умолчанию)
+    Set {
+        /// Имя профиля
+        name: String,
+    },
+    /// Удалить профиль вместе с его токеном
+    Delete {
+        /// Имя профиля
+        name: String,
+        /// Не спрашивать подтверждение (обязательно без терминала)
+        #[arg(short, long)]
+        force: bool,
+    },
+    /// Открыть файл профилей (config.toml) в $VISUAL / $EDITOR
+    Edit,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ProfileFormatArgs {
+    /// Формат вывода
+    #[arg(long, value_name = "FORMAT", default_value = "text", value_parser = ["text", "json"])]
+    pub format: String,
 }
 
 #[derive(Debug, Subcommand)]

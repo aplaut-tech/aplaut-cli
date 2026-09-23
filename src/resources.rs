@@ -47,7 +47,15 @@ pub static QUESTIONS: Resource = Resource {
 pub static ALL: &[&Resource] = &[&REVIEWS, &PRODUCTS, &QUESTIONS];
 
 /// Команды без операции API: работают только с локальными файлами.
-pub static LOCAL_COMMANDS: &[&str] = &["auth login", "auth logout"];
+pub static LOCAL_COMMANDS: &[&str] = &[
+    "auth login",
+    "auth logout",
+    "profile list",
+    "profile get",
+    "profile set",
+    "profile delete",
+    "profile edit",
+];
 
 pub fn find(name: &str) -> Option<&'static Resource> {
     ALL.iter().copied().find(|r| r.name == name)

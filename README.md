@@ -58,6 +58,25 @@ aplaut auth logout --profile ci
 допустим только для localhost. При явном `--profile` берётся `base_url` этого профиля (или прод),
 а `APLAUT_BASE_URL` игнорируется — чтобы токен профиля не ушёл на адрес из окружения.
 
+## Профили
+
+```bash
+aplaut profile list                                    # профили, base URL, есть ли токен; * — активный
+aplaut profile get staging --format json               # один профиль (text или json)
+aplaut profile set staging --base-url https://api.staging.example/v4   # создать или изменить
+aplaut profile set staging --base-url none             # вернуть прод по умолчанию
+aplaut profile delete staging                          # вместе с токеном; без терминала — --force
+aplaut profile edit                                    # config.toml в $VISUAL / $EDITOR
+```
+
+Токены эти команды не показывают и не меняют: токен задаёт только `aplaut auth login`.
+`profile edit` правит копию файла и заменяет оригинал только после проверки: при ошибке
+предлагает открыть снова, а если файл изменил другой процесс (например, `auth login`), правки
+остаются в копии. Без терминала `edit` не запускается — в скриптах используйте `profile set`.
+Неизвестные ключи в `config.toml` — ошибка: опечатка вроде `base-url` иначе молча отправила
+бы запросы на прод. Комментарии в файле пропадают, когда aplaut сам его перезаписывает
+(`auth login`, `profile set`).
+
 ## Выгрузка
 
 ```bash
