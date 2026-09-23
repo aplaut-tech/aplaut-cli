@@ -10,6 +10,7 @@ pub mod cli;
 pub mod clock;
 pub mod commands;
 pub mod config;
+pub mod envelope;
 pub mod error;
 pub mod filter;
 pub mod fsutil;
@@ -71,7 +72,7 @@ pub fn run() -> u8 {
             let text = if stderr_tty {
                 error::render_human(&err, color)
             } else {
-                format!("{}\n", error::render_json(&err, &name))
+                format!("{}\n", envelope::failure(&err, &name, false, &[]))
             };
             let _ = io::stderr().write_all(text.as_bytes());
             err.exit.code()
@@ -97,7 +98,11 @@ fn clap_error(err: clap::Error, stderr_tty: bool) -> u8 {
             let rendered = err.render().to_string();
             let message = rendered.trim().trim_start_matches("error: ").to_string();
             let usage = CliError::usage("usage", message).with_hint("aplaut --help");
-            let _ = writeln!(io::stderr(), "{}", error::render_json(&usage, "aplaut"));
+            let _ = writeln!(
+                io::stderr(),
+                "{}",
+                envelope::failure(&usage, "aplaut", false, &[])
+            );
             Exit::Usage.code()
         }
     }

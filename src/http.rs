@@ -309,7 +309,17 @@ impl ApiClient {
             api_error::from_response(resp.status, &resp.headers, &resp.body, &self.error_context);
         err.message = self.token.redact(&err.message);
         err.hint = err.hint.map(|h| self.token.redact(&h));
-        err
+        // Сколько ждать по словам сервера — агенту, чтобы не повторять раньше времени.
+        let wait = match resp.status {
+            429 => rate_limit_delay(&resp.headers, self.clock.unix_millis()),
+            503 => resp
+                .headers
+                .retry_after
+                .as_deref()
+                .and_then(parse_retry_after),
+            _ => None,
+        };
+        err.with_retry_after(wait)
     }
 
     fn outcome_unknown(&self, reason: &str) -> CliError {

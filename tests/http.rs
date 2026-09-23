@@ -118,6 +118,32 @@ fn too_long_rate_limit_wait_fails_fast() {
     assert!(clock.sleeps().is_empty());
 }
 
+/// Агенту — сколько ждать по словам сервера, чтобы не повторять раньше времени.
+#[test]
+fn rate_limit_errors_say_how_long_to_wait() {
+    let server = MockServer::start(vec![Reply::text(429, "").with_header("Retry-After", "3600")]);
+    let (mut api, _, _) = client(&server, 3);
+    let fast = api.get("/x", &[], Pace::Default).unwrap_err();
+    assert_eq!(fast.retry_after, Some(3600), "отказ сразу");
+    let server = MockServer::start(vec![Reply::text(429, "").with_header("Retry-After", "30")]);
+    let (mut api, _, _) = client(&server, 0);
+    let exhausted = api.get("/x", &[], Pace::Default).unwrap_err();
+    assert_eq!(exhausted.retry_after, Some(30), "повторы исчерпаны");
+    let server = MockServer::start(vec![Reply::text(503, "").with_header("Retry-After", "600")]);
+    let (mut api, _, _) = client(&server, 3);
+    let err = api.get("/x", &[], Pace::Default).unwrap_err();
+    assert_eq!(
+        (err.code.as_str(), err.retry_after),
+        ("server_error", Some(600))
+    );
+    let server = MockServer::start(vec![Reply::text(404, "")]);
+    let (mut api, _, _) = client(&server, 0);
+    assert_eq!(
+        api.get("/x", &[], Pace::Default).unwrap_err().retry_after,
+        None
+    );
+}
+
 #[test]
 fn retries_503_with_retry_after_and_5xx_with_backoff() {
     let server = MockServer::start(vec![

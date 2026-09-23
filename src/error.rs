@@ -4,6 +4,7 @@
 //! агент получал один формат с `retryable` и `hint`: без них LLM повторяет безнадёжный запрос.
 
 use std::fmt;
+use std::time::Duration;
 
 use serde::Serialize;
 
@@ -41,6 +42,8 @@ pub struct CliError {
     pub message: String,
     pub field: Option<String>,
     pub retryable: bool,
+    /// Сколько секунд ждать по словам сервера (429, 503), чтобы агент не повторял раньше.
+    pub retry_after: Option<u64>,
     pub hint: Option<String>,
     pub request_id: Option<String>,
     #[serde(skip)]
@@ -54,6 +57,7 @@ impl CliError {
             message: message.into(),
             field: None,
             retryable: false,
+            retry_after: None,
             hint: None,
             request_id: None,
             exit,
@@ -94,6 +98,12 @@ impl CliError {
         self
     }
 
+    /// Секунды округляются вверх: подождать на долю секунды дольше безопаснее, чем меньше.
+    pub fn with_retry_after(mut self, wait: Option<Duration>) -> Self {
+        self.retry_after = wait.map(|d| d.as_secs() + u64::from(d.subsec_nanos() > 0));
+        self
+    }
+
     /// Причина сохраняется, меняется только код выхода: важно, что данные уже ушли.
     pub fn into_partial(mut self) -> Self {
         self.exit = Exit::Partial;
@@ -108,25 +118,6 @@ impl fmt::Display for CliError {
 }
 
 impl std::error::Error for CliError {}
-
-#[derive(Serialize)]
-struct Envelope<'a> {
-    ok: bool,
-    command: &'a str,
-    cli_version: &'a str,
-    error: &'a CliError,
-}
-
-/// Одна строка JSON — последняя в stderr; её разбирают агент и обвязки cron.
-pub fn render_json(err: &CliError, command: &str) -> String {
-    serde_json::to_string(&Envelope {
-        ok: false,
-        command,
-        cli_version: env!("CARGO_PKG_VERSION"),
-        error: err,
-    })
-    .expect("CliError сериализуется всегда")
-}
 
 /// Для человека: сообщение, детали, подсказка последней строкой (clig: важное — в конце).
 pub fn render_human(err: &CliError, color: bool) -> String {
@@ -167,23 +158,6 @@ mod tests {
         .map(|e| e.code())
         .collect();
         assert_eq!(codes, vec![1, 2, 3, 4, 5, 7, 8]);
-    }
-
-    #[test]
-    fn json_envelope_has_fixed_shape() {
-        let err = CliError::usage("invalid_include", "неизвестный include «nope»")
-            .with_field("include")
-            .with_hint("допустимые значения: author, product");
-        let v: serde_json::Value =
-            serde_json::from_str(&render_json(&err, "reviews.scroll")).unwrap();
-        assert_eq!(v["ok"], false);
-        assert_eq!(v["command"], "reviews.scroll");
-        assert_eq!(v["cli_version"], env!("CARGO_PKG_VERSION"));
-        assert_eq!(v["error"]["code"], "invalid_include");
-        assert_eq!(v["error"]["field"], "include");
-        assert_eq!(v["error"]["retryable"], false);
-        assert_eq!(v["error"]["request_id"], serde_json::Value::Null);
-        assert!(v["error"].get("exit").is_none());
     }
 
     #[test]
