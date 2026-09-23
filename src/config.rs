@@ -51,12 +51,36 @@ pub struct ConfigFile {
     pub profiles: BTreeMap<String, ProfileConfig>,
 }
 
+/// Все поля перечислены в `CONFIG_HEADER` — тест не даст справке разойтись с кодом.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProfileConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
 }
+
+/// Справка в начале `config.toml`. aplaut пишет её при каждой своей записи файла, поэтому
+/// список опций виден всегда, хотя сериализатор TOML не сохраняет комментарии.
+pub const CONFIG_HEADER: &str = "\
+# Профили aplaut CLI. Токенов здесь нет — они в ./credentials (aplaut auth login --profile NAME),
+# поэтому этот файл можно показывать, например в issue.
+# Профиль выбирается так: --profile NAME → APLAUT_PROFILE → \"default\".
+# Править: aplaut profile edit (с проверкой) или aplaut profile set NAME ….
+# Этот заголовок aplaut восстанавливает сам; другие комментарии пропадут при его записи.
+#
+# [profiles.NAME] — профиль: настройки одного аккаунта или стенда
+#   - description — описание для людей, видно в aplaut profile list; по умолчанию нет
+#   - base_url    — адрес Platform API; по умолчанию https://api.aplaut.io/v4.
+#                   Удалённый хост — только https, http — только для localhost.
+#                   Главнее него флаг --base-url и APLAUT_BASE_URL (если нет явного --profile).
+#
+# Пример:
+# [profiles.staging]
+# description = \"Стенд для тестов\"
+# base_url = \"https://api.staging.example/v4\"
+";
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CredentialsFile {
@@ -97,11 +121,11 @@ pub fn load_credentials(paths: &Paths, reporter: &Reporter) -> Result<Credential
 }
 
 pub fn save_config(paths: &Paths, config: &ConfigFile) -> Result<(), CliError> {
-    save_toml(paths, &paths.config, config)
+    save_toml(paths, &paths.config, CONFIG_HEADER, config)
 }
 
 pub fn save_credentials(paths: &Paths, credentials: &CredentialsFile) -> Result<(), CliError> {
-    save_toml(paths, &paths.credentials, credentials)
+    save_toml(paths, &paths.credentials, "", credentials)
 }
 
 /// Сообщения парсера toml об ошибках типов цитируют значение (`invalid type: string "…"`),
@@ -134,7 +158,12 @@ fn parse_toml<T: DeserializeOwned>(text: &str, path: &Path, secret: bool) -> Res
     })
 }
 
-fn save_toml<T: Serialize>(paths: &Paths, path: &Path, value: &T) -> Result<(), CliError> {
+fn save_toml<T: Serialize>(
+    paths: &Paths,
+    path: &Path,
+    header: &str,
+    value: &T,
+) -> Result<(), CliError> {
     fsutil::ensure_private_dir(&paths.dir)
         .map_err(|e| CliError::io(&format!("создание {}", paths.dir.display()), &e))?;
     let text = toml::to_string_pretty(value).map_err(|e| {
@@ -143,6 +172,11 @@ fn save_toml<T: Serialize>(paths: &Paths, path: &Path, value: &T) -> Result<(), 
             format!("сериализация {}: {e}", path.display()),
         )
     })?;
+    let text = if header.is_empty() {
+        text
+    } else {
+        format!("{header}\n{text}")
+    };
     fsutil::write_atomic(path, text.as_bytes())
         .map_err(|e| CliError::io(&format!("запись {}", path.display()), &e))
 }
@@ -161,6 +195,28 @@ mod tests {
             ..EnvSnapshot::default()
         };
         Paths::resolve(&env).unwrap()
+    }
+
+    #[test]
+    fn reference_header_mentions_every_profile_option_and_is_only_comments() {
+        let every = ProfileConfig {
+            description: Some("x".into()),
+            base_url: Some("https://x/v4".into()),
+        };
+        let keys = serde_json::to_value(&every).unwrap();
+        for key in keys.as_object().unwrap().keys() {
+            assert!(
+                CONFIG_HEADER.contains(&format!("#   - {key}")),
+                "опция {key} не описана в заголовке"
+            );
+        }
+        assert!(CONFIG_HEADER
+            .lines()
+            .all(|l| l.is_empty() || l.starts_with('#')));
+        assert_eq!(
+            toml::from_str::<ConfigFile>(CONFIG_HEADER).unwrap(),
+            ConfigFile::default()
+        );
     }
 
     #[test]
@@ -201,6 +257,7 @@ mod tests {
             "ci".into(),
             ProfileConfig {
                 base_url: Some("https://x/v4".into()),
+                description: Some("Тестовый профиль".into()),
             },
         );
         save_config(&p, &cfg).unwrap();

@@ -63,13 +63,25 @@ aplaut auth logout --profile ci
 ```bash
 aplaut profile list                                    # профили, base URL, есть ли токен; * — активный
 aplaut profile get staging --format json               # один профиль (text или json)
-aplaut profile set staging --base-url https://api.staging.example/v4   # создать или изменить
-aplaut profile set staging --base-url none             # вернуть прод по умолчанию
+aplaut profile set staging --base-url https://api.staging.example/v4 --description "Стенд для тестов"
+aplaut profile set staging --base-url none             # вернуть прод по умолчанию (--description none — убрать описание)
 aplaut profile delete staging                          # вместе с токеном; без терминала — --force
 aplaut profile edit                                    # config.toml в $VISUAL / $EDITOR
 ```
 
+```text
+$ aplaut profile list
+  default — Прод, основной аккаунт
+    - base_url: https://api.aplaut.io/v4 (по умолчанию)
+    - токен: есть
+* staging — Стенд для тестов
+    - base_url: https://api.staging.example/v4
+    - токен: нет
+```
+
 Токены эти команды не показывают и не меняют: токен задаёт только `aplaut auth login`.
+В начале `config.toml` — закомментированная справка со всеми опциями профиля и их значениями
+по умолчанию; aplaut восстанавливает её при каждой своей записи файла.
 `profile edit` правит копию файла и заменяет оригинал только после проверки: при ошибке
 предлагает открыть снова, а если файл изменил другой процесс (например, `auth login`), правки
 остаются в копии. Без терминала `edit` не запускается — в скриптах используйте `profile set`.

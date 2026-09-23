@@ -10,23 +10,14 @@ use serde::Serialize;
 use super::Ctx;
 use crate::auth::{self, DEFAULT_BASE_URL};
 use crate::cli::ProfileVerb;
-use crate::config::{self, ConfigFile, CredentialsFile, Paths};
+use crate::config::{self, ConfigFile, CredentialsFile, Paths, ProfileConfig};
 use crate::error::{CliError, Exit};
 use crate::fsutil;
-
-/// Шаблон нового `config.toml`: только комментарии, поэтому разбирается как пустой конфиг.
-const TEMPLATE: &str = "\
-# Профили aplaut. Выбор профиля — `--profile NAME` или APLAUT_PROFILE, иначе `default`.
-# Токены здесь не хранятся: их задаёт `aplaut auth login --profile NAME`.
-# Комментарии пропадут, когда aplaut сам перезапишет файл (auth login, profile set).
-#
-# [profiles.staging]
-# base_url = \"https://api.staging.example/v4\"
-";
 
 #[derive(Debug, Serialize)]
 struct ProfileView {
     name: String,
+    description: Option<String>,
     base_url: String,
     base_url_default: bool,
     has_token: bool,
@@ -37,7 +28,7 @@ pub fn run(verb: ProfileVerb, ctx: &Ctx) -> Result<(), CliError> {
     match verb {
         ProfileVerb::List(args) => list(&args.format, ctx),
         ProfileVerb::Get { name, format } => get(&name, &format.format, ctx),
-        ProfileVerb::Set { name } => set(&name, ctx),
+        ProfileVerb::Set { name, description } => set(&name, description.as_deref(), ctx),
         ProfileVerb::Delete { name, force } => delete(&name, force, ctx),
         ProfileVerb::Edit => edit(ctx),
     }
@@ -70,7 +61,9 @@ pub fn edit_config(
         Some(text) => config::parse_config(text, &paths.config)?,
         None => ConfigFile::default(),
     };
-    let start_text = original.clone().unwrap_or_else(|| TEMPLATE.to_string());
+    let start_text = original
+        .clone()
+        .unwrap_or_else(|| config::CONFIG_HEADER.to_string());
     // Расширение .toml — чтобы редактор включил подсветку.
     let copy = paths
         .dir
@@ -153,6 +146,9 @@ fn validate(text: &str, paths: &Paths) -> Result<ConfigFile, CliError> {
     let config = config::parse_config(text, &paths.config)?;
     for (name, profile) in &config.profiles {
         auth::validate_profile_name(name)?;
+        if let Some(description) = &profile.description {
+            validate_description(description)?;
+        }
         if let Some(url) = &profile.base_url {
             auth::validate_base_url(url)?;
         }
@@ -162,26 +158,43 @@ fn validate(text: &str, paths: &Paths) -> Result<ConfigFile, CliError> {
 
 /// Короткая сводка для человека: что добавлено, изменено, удалено.
 fn changes(old: &ConfigFile, new: &ConfigFile) -> Vec<String> {
-    let url = |p: Option<&crate::config::ProfileConfig>| {
-        p.and_then(|p| p.base_url.clone())
+    let url = |p: &ProfileConfig| {
+        p.base_url
+            .clone()
             .unwrap_or_else(|| "прод по умолчанию".to_string())
     };
+    let desc = |p: &ProfileConfig| {
+        p.description
+            .as_deref()
+            .map(|d| format!("«{d}»"))
+            .unwrap_or_else(|| "нет".to_string())
+    };
     let names: BTreeSet<&String> = old.profiles.keys().chain(new.profiles.keys()).collect();
-    names
-        .into_iter()
-        .filter_map(|name| match (old.profiles.get(name), new.profiles.get(name)) {
-            (None, Some(p)) => Some(format!("{name}: добавлен, base_url {}", url(Some(p)))),
-            (Some(_), None) => Some(format!(
+    let mut out = Vec::new();
+    for name in names {
+        match (old.profiles.get(name), new.profiles.get(name)) {
+            (None, Some(p)) => {
+                let mut line = format!("{name}: добавлен, base_url {}", url(p));
+                if p.description.is_some() {
+                    line.push_str(&format!(", description {}", desc(p)));
+                }
+                out.push(line);
+            }
+            (Some(_), None) => out.push(format!(
                 "{name}: удалён из config.toml (токен, если был, остался — aplaut profile delete {name})"
             )),
-            (Some(a), Some(b)) if a != b => Some(format!(
-                "{name}: base_url {} → {}",
-                url(Some(a)),
-                url(Some(b))
-            )),
-            _ => None,
-        })
-        .collect()
+            (Some(a), Some(b)) => {
+                if a.base_url != b.base_url {
+                    out.push(format!("{name}: base_url {} → {}", url(a), url(b)));
+                }
+                if a.description != b.description {
+                    out.push(format!("{name}: description {} → {}", desc(a), desc(b)));
+                }
+            }
+            (None, None) => {}
+        }
+    }
+    out
 }
 
 fn list(format: &str, ctx: &Ctx) -> Result<(), CliError> {
@@ -196,29 +209,10 @@ fn list(format: &str, ctx: &Ctx) -> Result<(), CliError> {
         );
         return Ok(());
     }
-    let name_width = views
-        .iter()
-        .map(|v| v.name.chars().count())
-        .max()
-        .unwrap_or(0);
-    let url_width = views
-        .iter()
-        .map(|v| base_url_text(v).chars().count())
-        .max()
-        .unwrap_or(0);
-    let mut out = io::stdout().lock();
-    for v in &views {
-        writeln!(
-            out,
-            "{} {:name_width$}  {:url_width$}  токен: {}",
-            if v.active { "*" } else { " " },
-            v.name,
-            base_url_text(v),
-            if v.has_token { "есть" } else { "нет" },
-        )
-        .map_err(crate::output::write_error)?;
-    }
-    Ok(())
+    let text: String = views.iter().map(render).collect();
+    io::stdout()
+        .write_all(text.as_bytes())
+        .map_err(crate::output::write_error)
 }
 
 fn get(name: &str, format: &str, ctx: &Ctx) -> Result<(), CliError> {
@@ -230,42 +224,63 @@ fn get(name: &str, format: &str, ctx: &Ctx) -> Result<(), CliError> {
     if format == "json" {
         return print_json(view);
     }
-    let text = format!(
-        "профиль:  {}\nbase_url: {}\nтокен:    {}\nактивный: {}\n",
-        view.name,
-        base_url_text(view),
-        if view.has_token { "есть" } else { "нет" },
-        if view.active { "да" } else { "нет" },
-    );
+    let text = render(view);
     io::stdout()
         .write_all(text.as_bytes())
         .map_err(crate::output::write_error)
 }
 
 /// Upsert, как `set` во всей грамматике: несуществующий профиль создаётся.
-fn set(name: &str, ctx: &Ctx) -> Result<(), CliError> {
+/// `none` убирает значение (clig: специальное слово вместо пустой строки).
+fn set(name: &str, description: Option<&str>, ctx: &Ctx) -> Result<(), CliError> {
     auth::validate_profile_name(name)?;
-    let raw = ctx.global.base_url.as_deref().ok_or_else(|| {
-        CliError::usage(
-            "base_url_required",
-            "укажите --base-url URL или --base-url none",
-        )
-        .with_field("base_url")
-        .with_hint("none возвращает прод по умолчанию")
-    })?;
-    let base_url = match raw {
-        "none" => None,
-        url => Some(auth::validate_base_url(url)?),
+    let base_url = ctx.global.base_url.as_deref();
+    if base_url.is_none() && description.is_none() {
+        return Err(CliError::usage(
+            "nothing_to_set",
+            "укажите, что изменить: --base-url URL|none и/или --description TEXT|none",
+        ));
+    }
+    let base_url = match base_url {
+        None => None,
+        Some("none") => Some(None),
+        Some(url) => Some(Some(auth::validate_base_url(url)?)),
+    };
+    let description = match description {
+        None => None,
+        Some("none") => Some(None),
+        Some(text) => Some(Some(validate_description(text)?)),
     };
     let paths = Paths::resolve(&ctx.env)?;
     let mut cfg = config::load_config(&paths)?;
-    cfg.profiles.entry(name.to_string()).or_default().base_url = base_url.clone();
+    let entry = cfg.profiles.entry(name.to_string()).or_default();
+    if let Some(url) = base_url {
+        entry.base_url = url;
+    }
+    if let Some(text) = description {
+        entry.description = text;
+    }
+    let summary = format!(
+        "Профиль «{name}»: base_url — {}, описание — {}",
+        entry.base_url.as_deref().unwrap_or("прод по умолчанию"),
+        entry.description.as_deref().unwrap_or("нет")
+    );
     config::save_config(&paths, &cfg)?;
-    ctx.reporter.info(&format!(
-        "Профиль «{name}»: base_url — {}",
-        base_url.as_deref().unwrap_or("прод по умолчанию")
-    ));
+    ctx.reporter.info(&summary);
     Ok(())
+}
+
+/// Описание — одна строка: оно выводится в `profile list` после имени.
+fn validate_description(text: &str) -> Result<String, CliError> {
+    let text = text.trim();
+    if text.chars().any(char::is_control) {
+        return Err(CliError::usage(
+            "invalid_description",
+            "описание профиля должно быть одной строкой без управляющих символов",
+        )
+        .with_field("description"));
+    }
+    Ok(text.to_string())
 }
 
 fn delete(name: &str, force: bool, ctx: &Ctx) -> Result<(), CliError> {
@@ -375,6 +390,7 @@ fn views(cfg: &ConfigFile, creds: &CredentialsFile, active: &str) -> Vec<Profile
             let base_url = cfg.profiles.get(name).and_then(|p| p.base_url.clone());
             ProfileView {
                 name: name.clone(),
+                description: cfg.profiles.get(name).and_then(|p| p.description.clone()),
                 base_url_default: base_url.is_none(),
                 base_url: base_url.unwrap_or_else(|| DEFAULT_BASE_URL.to_string()),
                 has_token: creds.profiles.contains_key(name),
@@ -382,6 +398,20 @@ fn views(cfg: &ConfigFile, creds: &CredentialsFile, active: &str) -> Vec<Profile
             }
         })
         .collect()
+}
+
+/// `* имя — описание`, под ним опции списком; `*` — активный профиль.
+fn render(view: &ProfileView) -> String {
+    let mut text = format!("{} {}", if view.active { "*" } else { " " }, view.name);
+    if let Some(description) = &view.description {
+        text.push_str(&format!(" — {description}"));
+    }
+    text.push_str(&format!("\n    - base_url: {}\n", base_url_text(view)));
+    text.push_str(&format!(
+        "    - токен: {}\n",
+        if view.has_token { "есть" } else { "нет" }
+    ));
+    text
 }
 
 fn base_url_text(view: &ProfileView) -> String {

@@ -425,6 +425,7 @@ mod tests {
         let profile = |url: Option<&str>| {
             let p = ProfileConfig {
                 base_url: url.map(str::to_string),
+                ..ProfileConfig::default()
             };
             move || -> Result<Option<ProfileConfig>, CliError> { Ok(Some(p.clone())) }
         };

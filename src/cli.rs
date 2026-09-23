@@ -185,10 +185,13 @@ pub enum ProfileVerb {
         #[command(flatten)]
         format: ProfileFormatArgs,
     },
-    /// Создать или изменить профиль: `--base-url URL` (или `none` — прод по умолчанию)
+    /// Создать или изменить профиль: `--base-url URL|none`, `--description TEXT|none`
     Set {
         /// Имя профиля
         name: String,
+        /// Описание профиля для людей (`none` — убрать)
+        #[arg(long, value_name = "TEXT|none")]
+        description: Option<String>,
     },
     /// Удалить профиль вместе с его токеном
     Delete {

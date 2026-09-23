@@ -13,6 +13,15 @@ fn config_text(home: &Path) -> String {
     fs::read_to_string(home.join("config/aplaut/config.toml")).unwrap_or_default()
 }
 
+/// Только TOML без заголовка-справки: в комментариях упомянуты все опции.
+fn config_body(home: &Path) -> String {
+    config_text(home)
+        .lines()
+        .filter(|l| !l.starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn login(home: &Path, profile: &str, token: &str) {
     let out = aplaut(
         home,
@@ -47,7 +56,7 @@ fn set_creates_updates_and_resets_base_url() {
         "",
     );
     assert_eq!(reset.code, 0, "{}", reset.stderr);
-    let text = config_text(home.path());
+    let text = config_body(home.path());
     assert!(
         text.contains("[profiles.staging]") && !text.contains("base_url"),
         "{text}"
@@ -69,25 +78,24 @@ fn set_creates_updates_and_resets_base_url() {
 }
 
 #[test]
-fn list_merges_config_and_credentials_marks_active_and_never_prints_tokens() {
+fn list_is_a_tree_with_descriptions_marks_active_and_never_prints_tokens() {
     let home = TempDir::new("profile-list");
     login(home.path(), "ci", "tok-ci-secret");
-    assert_eq!(
-        aplaut(
-            home.path(),
-            &[
-                "profile",
-                "set",
-                "staging",
-                "--base-url",
-                "https://api.staging.example/v4"
-            ],
-            &[],
-            ""
-        )
-        .code,
-        0
+    let set = aplaut(
+        home.path(),
+        &[
+            "profile",
+            "set",
+            "staging",
+            "--base-url",
+            "https://api.staging.example/v4",
+            "--description",
+            "Стенд для тестов",
+        ],
+        &[],
+        "",
     );
+    assert_eq!(set.code, 0, "{}", set.stderr);
     let out = aplaut(
         home.path(),
         &["profile", "list"],
@@ -95,21 +103,10 @@ fn list_merges_config_and_credentials_marks_active_and_never_prints_tokens() {
         "",
     );
     assert_eq!(out.code, 0, "{}", out.stderr);
-    let lines: Vec<&str> = out.stdout.lines().collect();
-    assert_eq!(lines.len(), 2, "{}", out.stdout);
-    assert!(
-        lines[0].contains("ci")
-            && lines[0].contains("https://api.aplaut.io/v4")
-            && lines[0].contains("токен: есть"),
-        "{}",
-        lines[0]
-    );
-    assert!(
-        lines[1].starts_with("* staging")
-            && lines[1].contains("api.staging.example")
-            && lines[1].contains("токен: нет"),
-        "{}",
-        lines[1]
+    assert_eq!(
+        out.stdout,
+        "  ci\n    - base_url: https://api.aplaut.io/v4 (по умолчанию)\n    - токен: есть\n\
+         * staging — Стенд для тестов\n    - base_url: https://api.staging.example/v4\n    - токен: нет\n"
     );
     let json = aplaut(
         home.path(),
@@ -126,10 +123,87 @@ fn list_merges_config_and_credentials_marks_active_and_never_prints_tokens() {
         ),
         (Some(true), Some(true))
     );
+    assert!(v[0]["description"].is_null());
+    assert_eq!(v[1]["description"], "Стенд для тестов");
     assert_eq!(v[1]["base_url"], "https://api.staging.example/v4");
     for o in [&out, &json] {
         assert!(!o.stdout.contains("tok-ci-secret") && !o.stderr.contains("tok-ci-secret"));
     }
+}
+
+#[test]
+fn set_description_can_be_cleared_and_must_be_one_line() {
+    let home = TempDir::new("profile-desc");
+    assert_eq!(
+        aplaut(
+            home.path(),
+            &[
+                "profile",
+                "set",
+                "prod",
+                "--description",
+                "Основной аккаунт"
+            ],
+            &[],
+            ""
+        )
+        .code,
+        0
+    );
+    assert!(config_text(home.path()).contains("description = \"Основной аккаунт\""));
+    assert_eq!(
+        aplaut(
+            home.path(),
+            &["profile", "set", "prod", "--description", "none"],
+            &[],
+            ""
+        )
+        .code,
+        0
+    );
+    assert!(!config_body(home.path()).contains("description ="));
+    let multiline = aplaut(
+        home.path(),
+        &["profile", "set", "prod", "--description", "a\nb"],
+        &[],
+        "",
+    );
+    assert_eq!(multiline.code, 2);
+    assert_eq!(multiline.error_json()["error"]["field"], "description");
+    let nothing = aplaut(home.path(), &["profile", "set", "prod"], &[], "");
+    assert_eq!(nothing.code, 2);
+    assert_eq!(nothing.error_json()["error"]["code"], "nothing_to_set");
+}
+
+#[test]
+fn config_written_by_aplaut_keeps_the_reference_header() {
+    let home = TempDir::new("profile-header");
+    login(home.path(), "ci", "tok");
+    assert_eq!(
+        aplaut(
+            home.path(),
+            &["profile", "set", "ci", "--base-url", "https://x.example/v4"],
+            &[],
+            ""
+        )
+        .code,
+        0
+    );
+    let text = config_text(home.path());
+    assert!(text.starts_with("# Профили aplaut"), "{text}");
+    assert_eq!(
+        text.matches("# Профили aplaut").count(),
+        1,
+        "заголовок не дублируется: {text}"
+    );
+    assert!(
+        text.contains("#   - description") && text.contains("#   - base_url"),
+        "{text}"
+    );
+    assert!(
+        text.contains("[profiles.ci]\nbase_url = \"https://x.example/v4\""),
+        "{text}"
+    );
 }
 
 #[test]
@@ -182,7 +256,7 @@ fn delete_needs_force_without_terminal_and_removes_token_and_config() {
         "",
     );
     assert_eq!(deleted.code, 0, "{}", deleted.stderr);
-    assert!(!config_text(home.path()).contains("ci"));
+    assert!(!config_body(home.path()).contains("ci"));
     let creds = fs::read_to_string(home.path().join("config/aplaut/credentials")).unwrap();
     assert!(!creds.contains("tok-ci"));
     assert_eq!(
