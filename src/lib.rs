@@ -13,6 +13,7 @@ pub mod output;
 pub mod page;
 pub mod secret;
 pub mod spec;
+pub mod state;
 pub mod term;
 pub mod time;
 
