@@ -6,10 +6,11 @@ use std::path::Path;
 
 use serde_json::{Map, Value};
 
-use super::{connect, records, Ctx, Outcome, DRY_RUN_PREFIX};
+use super::{check_id, connect, records, Ctx, Outcome, DRY_RUN_PREFIX};
 use crate::auth::StdinSource;
-use crate::cli::{CreateReviewArgs, ReviewsVerb};
+use crate::cli::{CommentArgs, CreateReviewArgs, ReviewsVerb};
 use crate::error::CliError;
+use crate::http;
 use crate::ops::write::{self, Flag, WriteRequest, WriteResult};
 use crate::page::record_id;
 use crate::resources::{self, Verb};
@@ -20,6 +21,7 @@ pub fn run(verb: ReviewsVerb, ctx: &Ctx) -> Result<Outcome, CliError> {
     match verb {
         ReviewsVerb::Records(verb) => records::run(&resources::REVIEWS, verb, ctx),
         ReviewsVerb::Create(args) => create(&args, ctx),
+        ReviewsVerb::Comment(args) => comment(&args, ctx),
     }
 }
 
@@ -52,6 +54,42 @@ fn create_flags(args: &CreateReviewArgs) -> Vec<Flag<'_>> {
         ("author_name", args.author_name.as_deref()),
         ("author_email", args.author_email.as_deref()),
         ("state", args.state.as_deref()),
+    ]
+}
+
+fn comment(args: &CommentArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
+    check_id(&args.review_id, "review_id")?;
+    let (spec, template) = write_operation(Verb::Comment)?;
+    let flags = comment_flags(args);
+    let attributes = prepare(spec, args.data.as_deref(), &flags, ctx)?;
+    let review = &args.review_id;
+    let lookup = format!(
+        "aplaut reviews get {} --include comments --format jsonl",
+        shell_word(review)
+    );
+    let verify = match attributes.get("external_id").and_then(Value::as_str) {
+        Some(id) => format!("проверьте, добавлен ли комментарий с external_id {id}: {lookup}"),
+        None => format!("проверьте, прежде чем повторять: {lookup}"),
+    };
+    let path = template.replace("{id}", &http::path_segment(review));
+    let request = write::request(spec, path, attributes);
+    execute(request, args.dry.dry_run, &verify, ctx, |created| {
+        format!(
+            "Комментарий добавлен к отзыву {review}: id {}",
+            id_of(created)
+        )
+    })
+}
+
+/// Флаги `comment` → атрибуты схемы POST /reviews/{id}/relationships/comments (§3).
+fn comment_flags(args: &CommentArgs) -> Vec<Flag<'_>> {
+    vec![
+        ("text", args.text.as_deref()),
+        ("author_name", args.author_name.as_deref()),
+        ("author_email", args.author_email.as_deref()),
+        ("state", args.state.as_deref()),
+        ("parent_id", args.parent_id.as_deref()),
+        ("external_id", args.external_id.as_deref()),
     ]
 }
 
@@ -130,4 +168,38 @@ fn execute(
 
 fn id_of(record: &Value) -> &str {
     record_id(record).unwrap_or("?")
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+    use crate::cli::{Cli, Command};
+
+    fn reviews_verb(args: &[&str]) -> ReviewsVerb {
+        match Cli::try_parse_from(args).unwrap().command {
+            Command::Reviews { verb } => verb,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn every_flag_is_an_attribute_of_the_spec_schema() {
+        let (create_spec, _) = write_operation(Verb::Create).unwrap();
+        let ReviewsVerb::Create(args) = reviews_verb(&["aplaut", "reviews", "create"]) else {
+            panic!("create");
+        };
+        for (name, _) in create_flags(&args) {
+            assert!(create_spec.attribute(name).is_some(), "create --{name}");
+        }
+        let (comment_spec, _) = write_operation(Verb::Comment).unwrap();
+        let ReviewsVerb::Comment(args) = reviews_verb(&["aplaut", "reviews", "comment", "r1"])
+        else {
+            panic!("comment");
+        };
+        for (name, _) in comment_flags(&args) {
+            assert!(comment_spec.attribute(name).is_some(), "comment --{name}");
+        }
+    }
 }

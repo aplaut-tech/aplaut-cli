@@ -165,6 +165,39 @@ rate_limited (retry_after — сколько секунд ждать), server_er
 или он отклонён; 7 — rate limit, повторы исчерпаны; 1 — прочие ошибки, в том числе
 request_outcome_unknown (исход неизвестен — проверьте, прежде чем повторять).";
 
+const REVIEWS_COMMENT_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut reviews comment 5f1c2a9e8b7d6c5b4a3f2e1d --text \"Спасибо за отзыв!\" --author-name \"Магазин\"
+  aplaut reviews comment crm-4211 --text \"Спасибо!\" -n        # показать запрос, не отправляя
+
+  # Для агента: сначала план — показать человеку result.request.body, после согласия — отправка.
+  aplaut reviews comment crm-4211 --text \"Спасибо за отзыв!\" --external-id reply-crm-4211 -n --json
+  aplaut reviews comment crm-4211 --text \"Спасибо за отзыв!\" --external-id reply-crm-4211 --json
+
+REVIEW_ID — внутренний идентификатор отзыва или его external_id. Атрибуты — из схемы тела
+POST /reviews/{id}/relationships/comments; через --data — остальные (files, hide_my_data,
+author_external_id, external_parent_id, …); флаги перекрывают одноимённые ключи --data.
+С -n (--dry-run) токен проверяется, но запросов нет.
+
+Повторы — как у create: только если сервер точно не обработал запрос. Иначе
+request_outcome_unknown, а в hint — как проверить: aplaut reviews get <REVIEW_ID> --include comments.
+
+JSON (--json):
+  {\"ok\":true,\"command\":\"reviews.comment\",\"cli_version\":…,\"dry_run\":false,
+   \"result\":{\"request\":{\"method\":\"POST\",\"path\":\"/reviews/<id>/relationships/comments\",
+   \"body\":{\"data\":{\"type\":\"comments\",\"attributes\":{\"text\":…}}}},
+   \"created\":{\"id\",\"type\":\"comments\",\"attributes\":{…}}},\"warnings\":[]}
+  С -n — тот же request, \"created\":null и \"dry_run\":true.
+
+Ошибки: invalid_id, unknown_attribute, invalid_attribute, missing_attribute, invalid_data,
+stdin_conflict, stdin_is_terminal, not_found (отзыва нет), validation_failed,
+request_outcome_unknown, bad_response, no_token, invalid_token, unauthorized, forbidden,
+rate_limited (retry_after — сколько секунд ждать), server_error, network_error.
+
+Коды выхода: 0 — добавлен (с -n — план); 2 — ошибка во входных данных, до сети; 3 — нет токена
+или он отклонён; 5 — отзыва нет; 7 — rate limit, повторы исчерпаны; 1 — прочие ошибки, в том
+числе request_outcome_unknown (исход неизвестен — проверьте, прежде чем повторять).";
+
 /// Короткая справка (`-h`) листовых команд отсылает к длинной.
 const LEAF_AFTER_HELP: &str = "Примеры, поля JSON (--json) и коды выхода: --help";
 
@@ -382,6 +415,38 @@ pub enum ReviewsVerb {
     /// Создать отзыв (POST /reviews): атрибуты флагами или JSON-объектом в --data
     #[command(after_help = LEAF_AFTER_HELP, after_long_help = REVIEWS_CREATE_AFTER_LONG_HELP)]
     Create(CreateReviewArgs),
+    /// Ответить на отзыв (POST /reviews/{id}/relationships/comments)
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = REVIEWS_COMMENT_AFTER_LONG_HELP)]
+    Comment(CommentArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct CommentArgs {
+    /// Отзыв: внутренний или внешний (external_id) идентификатор
+    pub review_id: String,
+    /// Текст комментария
+    #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+    pub text: Option<String>,
+    /// Имя автора
+    #[arg(long, value_name = "TEXT")]
+    pub author_name: Option<String>,
+    /// E-mail автора
+    #[arg(long, value_name = "EMAIL")]
+    pub author_email: Option<String>,
+    /// Статус модерации: published, waiting, banned
+    #[arg(long, value_name = "STATE")]
+    pub state: Option<String>,
+    /// Внутренний id родительского комментария — ответ на комментарий
+    #[arg(long, value_name = "ID")]
+    pub parent_id: Option<String>,
+    /// Id комментария в вашей системе: по нему его проще найти после сбоя
+    #[arg(long, value_name = "ID")]
+    pub external_id: Option<String>,
+    /// Атрибуты JSON-объектом из файла (`-` — из stdin); флаги перекрывают его ключи
+    #[arg(long, value_name = "FILE|-")]
+    pub data: Option<PathBuf>,
+    #[command(flatten)]
+    pub dry: DryRun,
 }
 
 /// Частые атрибуты — флагами, остальные — через `--data` (W5). Свободный текст может начинаться

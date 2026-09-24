@@ -373,3 +373,131 @@ fn failed_plan_is_marked_dry_run() {
     local_error(&server, &out, "missing_attribute", "body");
     assert_eq!(out.error_json()["dry_run"], true);
 }
+
+#[test]
+fn comment_posts_to_the_encoded_review_path() {
+    let server = MockServer::start(vec![created("comments", "c1")]);
+    let out = run(
+        &server,
+        &[
+            "reviews",
+            "comment",
+            "crm/42 а",
+            "--text",
+            "Спасибо за отзыв!",
+            "--state",
+            "published",
+            "--json",
+        ],
+        "",
+    );
+    let v = envelope(&out);
+    let req = &server.requests()[0];
+    assert_eq!(
+        (req.method.as_str(), req.path.as_str()),
+        (
+            "POST",
+            "/v4/reviews/crm%2F42%20%D0%B0/relationships/comments"
+        )
+    );
+    assert_eq!(
+        req.json(),
+        json!({"data": {"type": "comments", "attributes": {"text": "Спасибо за отзыв!", "state": "published"}}})
+    );
+    assert_eq!(v["command"], "reviews.comment");
+    assert_eq!(
+        v["result"]["request"]["path"],
+        "/reviews/crm%2F42%20%D0%B0/relationships/comments"
+    );
+    assert_eq!(v["result"]["created"]["id"], "c1");
+}
+
+#[test]
+fn comment_on_a_missing_review_is_exit_5() {
+    let server = MockServer::start(vec![Reply::json(
+        404,
+        r#"{"errors":{"status":404,"title":"Not found"}}"#,
+    )]);
+    let out = run(
+        &server,
+        &["reviews", "comment", "nope", "--text", "Спасибо!"],
+        "",
+    );
+    assert_eq!(out.code, 5, "{}", out.stderr);
+    let err = out.error_json();
+    assert_eq!(
+        (err["command"].as_str(), err["error"]["code"].as_str()),
+        (Some("reviews.comment"), Some("not_found"))
+    );
+}
+
+#[test]
+fn comment_input_is_checked_before_the_network() {
+    let server = MockServer::start(vec![]);
+    let missing = run(&server, &["reviews", "comment", "r1"], "");
+    local_error(&server, &missing, "missing_attribute", "text");
+    let held = run(
+        &server,
+        &["reviews", "comment", "r1", "--text", "x", "--state", "held"],
+        "",
+    );
+    local_error(&server, &held, "invalid_attribute", "state");
+    let empty = run(&server, &["reviews", "comment", "", "--text", "x"], "");
+    local_error(&server, &empty, "invalid_id", "review_id");
+    let plan = run(&server, &["reviews", "comment", "r1", "-n"], "");
+    local_error(&server, &plan, "missing_attribute", "text");
+    assert_eq!(plan.error_json()["dry_run"], true);
+}
+
+#[test]
+fn comment_dry_run_then_text_mode() {
+    let server = MockServer::start(vec![created("comments", "c1")]);
+    let plan = run(
+        &server,
+        &["reviews", "comment", "r1", "--text", "Спасибо!", "-n"],
+        "",
+    );
+    assert_eq!(plan.code, 0, "{}", plan.stderr);
+    assert!(
+        plan.stderr.starts_with(
+            "Пробный запуск, ничего не изменено: POST /reviews/r1/relationships/comments\n"
+        ),
+        "{}",
+        plan.stderr
+    );
+    assert!(server.requests().is_empty());
+    let out = run(
+        &server,
+        &["reviews", "comment", "r1", "--text", "Спасибо!"],
+        "",
+    );
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    assert_eq!(out.stderr, "Комментарий добавлен к отзыву r1: id c1\n");
+}
+
+#[test]
+fn comment_unknown_outcome_points_to_the_review_comments() {
+    let server = MockServer::start(vec![Reply::Hangup]);
+    let out = run(
+        &server,
+        &[
+            "reviews",
+            "comment",
+            "r1",
+            "--text",
+            "Спасибо!",
+            "--external-id",
+            "reply-1",
+        ],
+        "",
+    );
+    assert_eq!(out.code, 1, "{}", out.stderr);
+    let err = out.error_json();
+    assert_eq!(err["error"]["code"], "request_outcome_unknown");
+    let hint = err["error"]["hint"].as_str().unwrap();
+    assert!(
+        hint.contains("aplaut reviews get r1 --include comments") && hint.contains("reply-1"),
+        "{hint}"
+    );
+    assert_eq!(server.requests().len(), 1);
+}

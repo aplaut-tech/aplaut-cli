@@ -14,7 +14,10 @@ use serde::Serialize;
 
 use crate::api_error::ErrorContext;
 use crate::auth::{EnvSnapshot, StdinSource, TokenFlags, DEFAULT_BASE_URL};
-use crate::cli::{AuthVerb, Command, GlobalArgs, ProfileVerb, RecordsVerb, ReviewsVerb};
+use crate::cli::{
+    AuthVerb, Command, CommentArgs, CreateReviewArgs, GlobalArgs, ProfileVerb, RecordsVerb,
+    ReviewsVerb,
+};
 use crate::clock::Clock;
 use crate::config::{self, Paths};
 use crate::error::CliError;
@@ -119,8 +122,11 @@ pub fn is_dry_run(command: &Command) -> bool {
             verb: AuthVerb::Login(dry) | AuthVerb::Logout(dry),
         } => dry.dry_run,
         Command::Reviews {
-            verb: ReviewsVerb::Create(args),
-        } => args.dry.dry_run,
+            verb: ReviewsVerb::Create(CreateReviewArgs { dry, .. }),
+        }
+        | Command::Reviews {
+            verb: ReviewsVerb::Comment(CommentArgs { dry, .. }),
+        } => dry.dry_run,
         _ => false,
     }
 }
@@ -156,6 +162,7 @@ fn reviews_verb(verb: &ReviewsVerb) -> &'static str {
     match verb {
         ReviewsVerb::Records(verb) => records_verb(verb),
         ReviewsVerb::Create(_) => "create",
+        ReviewsVerb::Comment(_) => "comment",
     }
 }
 

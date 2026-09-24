@@ -59,7 +59,7 @@ fn every_command_maps_to_a_spec_operation() {
                 "«{joined}»: нет GET /{}/{{id}}",
                 resource.records_type
             ),
-            Verb::Create => assert!(
+            Verb::Create | Verb::Comment => assert!(
                 spec::write_spec(method, &operation).is_some(),
                 "«{joined}»: нет схемы тела {method} {operation}"
             ),

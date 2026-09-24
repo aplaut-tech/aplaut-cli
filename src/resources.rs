@@ -7,6 +7,7 @@ pub enum Verb {
     Scroll,
     Get,
     Create,
+    Comment,
 }
 
 impl Verb {
@@ -15,6 +16,7 @@ impl Verb {
             Verb::Scroll => "scroll",
             Verb::Get => "get",
             Verb::Create => "create",
+            Verb::Comment => "comment",
         }
     }
 
@@ -24,6 +26,10 @@ impl Verb {
             Verb::Scroll => ("GET", "/scroll/{records_type}".to_string()),
             Verb::Get => ("GET", format!("/{}/{{id}}", resource.records_type)),
             Verb::Create => ("POST", format!("/{}", resource.records_type)),
+            Verb::Comment => (
+                "POST",
+                format!("/{}/{{id}}/relationships/comments", resource.records_type),
+            ),
         }
     }
 }
@@ -38,7 +44,7 @@ pub struct Resource {
 pub static REVIEWS: Resource = Resource {
     name: "reviews",
     records_type: "reviews",
-    verbs: &[Verb::Scroll, Verb::Get, Verb::Create],
+    verbs: &[Verb::Scroll, Verb::Get, Verb::Create, Verb::Comment],
 };
 pub static PRODUCTS: Resource = Resource {
     name: "products",
