@@ -38,6 +38,22 @@ curl … | APLAUT_CLI_NO_MODIFY_PATH=1 sh
 `~/.config/fish/conf.d/aplaut-cli.env.fish` и строку с `aplaut-cli/env.sh` в `~/.profile` /
 `~/.zshrc`. Токены и профили лежат отдельно, в `~/.config/aplaut/`.
 
+## Обновление
+
+```bash
+aplaut self update        # последний релиз — тем же установщиком, в тот же каталог
+aplaut self update -n     # только проверить, есть ли новая версия
+```
+
+Работает, если `aplaut` поставлен установщиком выше: тот оставляет файл установки
+`~/.config/aplaut-cli/aplaut-cli-receipt.json`. Поставленный иначе (`cargo install`,
+`APLAUT_CLI_UNMANAGED_INSTALL`, распаковка архива) обновляйте тем же способом, которым ставили.
+Версия 0.1.0 команды ещё не знает — один раз переставьте её установщиком.
+
+Без токена GitHub даёт 60 запросов в час с одного IP; в CI задайте `APLAUT_CLI_GITHUB_TOKEN`.
+В минимальном контейнере для `self update` нужен пакет `ca-certificates`: в отличие от остальных
+команд, она проверяет сертификаты по системному хранилищу.
+
 ## Токен
 
 Токен выпускается в ЛК: «Разработчикам» → OAuth-приложение со scope Platform API.
@@ -217,7 +233,7 @@ aplaut products update 60757 --price 5490 --available true
 | `--json` | итог и ошибка — одной строкой JSON; предупреждения — в `warnings`, а не текстом; включает `--no-input` |
 | `--no-input` | ничего не спрашивать: вместо вопроса — ошибка с подсказкой, какой флаг передать |
 | `--yes` (`-y`) | подтвердить удаление без вопроса (`profile delete`) |
-| `--dry-run` (`-n`) | у `profile set/delete`, `auth login/logout`, `reviews create/comment`, `products create/update`: всё проверить и вернуть план в `result`, ничего не меняя |
+| `--dry-run` (`-n`) | у `profile set/delete`, `auth login/logout`, `reviews create/comment`, `products create/update`, `self update`: всё проверить и вернуть план в `result`, ничего не меняя |
 
 ```json
 {"ok":true,"command":"profile.set","cli_version":"0.1.0","dry_run":false,
@@ -323,7 +339,7 @@ aplaut products update 60757 --price 5490 --available true
 ## Разработка
 
 ```bash
-mise install            # тулчейн 1.98.1, musl-таргет, cargo-dist
+mise install            # тулчейн 1.98.1, musl-таргет, cargo-dist; для musl-сборки нужен пакет musl (musl-gcc)
 cargo test              # модульные и интеграционные тесты с мок-сервером
 cargo build --release --target x86_64-unknown-linux-musl
 APLAUT_E2E_BASE_URL=… APLAUT_ACCESS_TOKEN_FILE=… cargo test --test e2e -- --ignored --test-threads=1
