@@ -10,6 +10,7 @@ targets = "x86_64-unknown-linux-musl"
 
 [env]
 RUST_BACKTRACE = "1"
-# ring (через rustls) компилирует C-код; для musl-таргета локально хватает clang.
+# ring и aws-lc-sys (через rustls) компилируют C-код; для musl-таргета нужны заголовки musl,
+# с заголовками glibc aws-lc не линкуется (__isoc23_strtol). Локально — пакет musl (musl-gcc).
 # В CI cargo-dist ставит musl-tools сам, эта переменная там не нужна.
-CC_x86_64_unknown_linux_musl = "clang"
+CC_x86_64_unknown_linux_musl = "musl-gcc"
