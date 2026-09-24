@@ -274,12 +274,12 @@ aplaut products update 60757 --price 5490 --available true
 | `scroll_position_uncertain` | 2 | прошлый запуск оборвался посреди продолжения; в `hint` — команда для нового обхода |
 | `no_token` | 3 | токен не найден ни в одном источнике |
 | `token_file_unreadable` | 3 | файл токена не читается |
-| `unauthorized`, `invalid_token` | 3 | 401: токен отклонён (код — из `WWW-Authenticate`, если сервер его прислал) |
+| `unauthorized`, `invalid_token` | 3 | 401: токен отклонён (код — из `WWW-Authenticate`, если сервер его прислал); у `self update` — GitHub отклонил `APLAUT_CLI_GITHUB_TOKEN` |
 | `forbidden` | 3 | 403: у токена нет прав |
 | `output_closed` | 4 | получатель закрыл stdout (например, `\| head`) |
 | `not_found` | 5 | 404 |
 | `profile_not_found` | 5 | профиля нет; в `hint` — существующие |
-| `rate_limited` | 7 | 429: повторы исчерпаны или ждать дольше 5 минут; `retry_after` — сколько |
+| `rate_limited` | 7 | 429: повторы исчерпаны или ждать дольше 5 минут; `retry_after` — сколько. У `self update` — 403/429 GitHub API, `retry_after` — `null` |
 | `confirmation_required` | 8 | удаление без `--yes` там, где спросить нельзя |
 | `bad_request` | 1 | 400 |
 | `validation_failed` | 1 | 422: сервер отклонил параметры |
@@ -295,6 +295,7 @@ aplaut products update 60757 --price 5490 --available true
 | `bad_response` | 1 | ответ не по контракту: не JSON, `has_more` без курсора, 2xx записи без `data` (запись, скорее всего, выполнена; `retryable: false` у POST, `true` у идемпотентного PUT) |
 | `scroll_interrupted` | 1 | продолжение оборвалось, неизвестно, обработал ли его сервер; в `hint` — как продолжить |
 | `no_progress` | 1 | страницы без новых записей: обход зациклился |
+| `update_unavailable` | 1 | `self update`: aplaut поставлен не установщиком (нет receipt или он от другого бинаря) или на GitHub нет релиза с установщиком; ничего не изменено |
 | `update_failed` | 1 | `self update`: установщик новой версии завершился с ошибкой (подробности — выше, в его выводе) или GitHub ответил непонятно |
 | `config_invalid` | 1 | `config.toml` не разбирается или в нём неизвестные ключи |
 | `credentials_invalid` | 1 | `credentials` не разбирается |
