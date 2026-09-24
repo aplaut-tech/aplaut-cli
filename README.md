@@ -295,6 +295,7 @@ aplaut products update 60757 --price 5490 --available true
 | `bad_response` | 1 | ответ не по контракту: не JSON, `has_more` без курсора, 2xx записи без `data` (запись, скорее всего, выполнена; `retryable: false` у POST, `true` у идемпотентного PUT) |
 | `scroll_interrupted` | 1 | продолжение оборвалось, неизвестно, обработал ли его сервер; в `hint` — как продолжить |
 | `no_progress` | 1 | страницы без новых записей: обход зациклился |
+| `update_failed` | 1 | `self update`: установщик новой версии завершился с ошибкой (подробности — выше, в его выводе) или GitHub ответил непонятно |
 | `config_invalid` | 1 | `config.toml` не разбирается или в нём неизвестные ключи |
 | `credentials_invalid` | 1 | `credentials` не разбирается |
 | `config_changed_during_edit` | 1 | `config.toml` изменился, пока был открыт редактор; правки — в копии |

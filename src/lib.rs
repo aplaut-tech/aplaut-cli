@@ -25,6 +25,7 @@ pub mod state;
 pub mod suggest;
 pub mod term;
 pub mod time;
+pub mod update;
 
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Write};
