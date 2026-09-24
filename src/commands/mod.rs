@@ -4,6 +4,7 @@ pub mod auth;
 pub mod profile;
 pub mod records;
 pub mod reviews;
+pub mod writes;
 
 use std::io::{self, IsTerminal};
 use std::path::Path;

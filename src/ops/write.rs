@@ -10,7 +10,7 @@ use serde_json::{Map, Value};
 
 use crate::auth::StdinSource;
 use crate::error::CliError;
-use crate::http::{self, ApiClient};
+use crate::http::{self, ApiClient, Method, Replay};
 use crate::spec::{AttrType, AttributeSpec, WriteSpec};
 use crate::suggest;
 use crate::time;
@@ -31,11 +31,15 @@ pub struct WriteRequest {
     pub body: Value,
 }
 
-/// `result` у `create`/`comment`: одинаковый под `-n` (`created: null`) и без (W9).
-#[derive(Debug, Serialize)]
-pub struct WriteResult {
-    pub request: WriteRequest,
-    pub created: Option<Value>,
+/// `result` команды записи: `{"request": …, "<outcome>": запись | null}` — одинаковый под `-n` (W9).
+pub fn result(request: &WriteRequest, outcome: &str, record: Option<Value>) -> Value {
+    let mut result = Map::new();
+    result.insert(
+        "request".into(),
+        serde_json::to_value(request).expect("запрос сериализуется"),
+    );
+    result.insert(outcome.into(), record.unwrap_or(Value::Null));
+    Value::Object(result)
 }
 
 /// stdin один: `--data -` и токен из stdin прочитать оба нельзя.
@@ -163,19 +167,26 @@ pub fn request(spec: &WriteSpec, path: String, attributes: Map<String, Value>) -
     }
 }
 
-/// Отправка (W7). 2xx — запись создана: `data` ответа. Исход неизвестен — в подсказке `verify`:
-/// как проверить, прежде чем повторять.
+/// Отправка (W7). 2xx — запись создана или изменена: `data` ответа. `replay` — когда повтор
+/// безопасен; исход неизвестен — в подсказке `verify`: как проверить, прежде чем повторять.
 pub fn submit(
     api: &mut ApiClient,
     request: &WriteRequest,
+    replay: Replay,
     verify: &str,
 ) -> Result<Value, CliError> {
-    let response =
-        api.post(&request.path, &request.body)
-            .map_err(|err| match err.code.as_str() {
-                http::OUTCOME_UNKNOWN => err.with_hint(verify),
-                _ => err,
-            })?;
+    let method = Method::from_name(request.method).ok_or_else(|| {
+        CliError::general(
+            "internal",
+            format!("метод записи {} не поддерживается", request.method),
+        )
+    })?;
+    let response = api
+        .write(method, &request.path, &request.body, replay)
+        .map_err(|err| match err.code.as_str() {
+            http::OUTCOME_UNKNOWN => err.with_hint(verify),
+            _ => err,
+        })?;
     serde_json::from_slice::<Value>(&response.body)
         .ok()
         .and_then(|mut doc| doc.get_mut("data").map(Value::take))
@@ -184,10 +195,7 @@ pub fn submit(
             // Запрос выполнен (2xx): повтор создал бы дубль, поэтому retryable остаётся false.
             CliError::general(
                 "bad_response",
-                format!(
-                    "сервер ответил {}, но в теле нет созданной записи",
-                    response.status
-                ),
+                format!("сервер ответил {}, но в теле нет записи", response.status),
             )
             .with_request_id(response.request_id.clone())
             .with_hint(format!(
@@ -561,6 +569,17 @@ mod tests {
         assert!(check_stdin(Some(dash), false, Some(Path::new("token.txt"))).is_ok());
         assert!(check_stdin(Some(Path::new("review.json")), true, None).is_ok());
         assert!(check_stdin(None, true, None).is_ok());
+    }
+
+    #[test]
+    fn result_has_the_request_and_the_record_under_its_key() {
+        let plan = request(reviews(), "/reviews".into(), object(json!({"rating": 5})));
+        let planned = result(&plan, "created", None);
+        assert_eq!(planned["created"], Value::Null);
+        assert_eq!(planned["request"]["path"], "/reviews");
+        let done = result(&plan, "updated", Some(json!({"id": "p1"})));
+        assert_eq!(done["updated"]["id"], "p1");
+        assert!(done.get("created").is_none());
     }
 
     #[test]

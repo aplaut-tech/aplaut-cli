@@ -1,21 +1,15 @@
 //! Запись у отзывов: `create` и `comment` (спека reviews-write). Чтение (`scroll`, `get`) —
-//! общее с другими ресурсами, в `records`.
+//! общее с другими ресурсами, в `records`; общее для записи — в `writes`.
 
-use std::io::{self, IsTerminal};
-use std::path::Path;
-
-use clap::CommandFactory;
 use serde_json::{Map, Value};
 
-use super::{check_id, connect, records, Ctx, Outcome, DRY_RUN_PREFIX};
-use crate::auth::StdinSource;
-use crate::cli::{Cli, CommentArgs, CreateReviewArgs, ReviewsVerb};
+use super::writes::{check_texts, execute, id_of, prepare, write_operation, Submission};
+use super::{check_id, records, Ctx, Outcome};
+use crate::cli::{CommentArgs, CreateReviewArgs, ReviewsVerb};
 use crate::error::CliError;
-use crate::http;
-use crate::ops::write::{self, Flag, WriteRequest, WriteResult};
-use crate::page::record_id;
+use crate::http::{self, Replay};
+use crate::ops::write::{self, Flag};
 use crate::resources::{self, Verb};
-use crate::spec::{self, WriteSpec};
 use crate::term::shell_word;
 
 pub fn run(verb: ReviewsVerb, ctx: &Ctx) -> Result<Outcome, CliError> {
@@ -39,7 +33,7 @@ fn create(args: &CreateReviewArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
             ("cons", args.cons.as_deref()),
         ],
     )?;
-    let (spec, path) = write_operation(Verb::Create)?;
+    let (spec, path) = write_operation(&resources::REVIEWS, Verb::Create)?;
     let flags = create_flags(args);
     let required: Vec<&str> = spec
         .required
@@ -57,44 +51,15 @@ fn create(args: &CreateReviewArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
         ),
         _ => "проверьте в личном кабинете, прежде чем повторять; с --external-id это делает aplaut reviews get <external_id>".to_string(),
     };
-    let request = write::request(spec, path, attributes);
-    execute(request, args.dry.dry_run, &verify, ctx, |created| {
+    let submission = Submission {
+        request: write::request(spec, path, attributes),
+        replay: Replay::OnlyIfUnprocessed,
+        verify,
+        outcome: "created",
+    };
+    execute(submission, args.dry.dry_run, ctx, |created| {
         format!("Отзыв создан: id {}", id_of(created))
     })
-}
-
-/// Свободный текст можно начинать с `-` (`allow_hyphen_values`), но значение, равное флагу
-/// команды, значит, что сам текст пропущен (`--text $EMPTY -n`): иначе `-n` ушёл бы в отзыв
-/// текстом, а пробный запуск стал бы настоящей записью.
-fn check_texts(path: &[&str], texts: &[Flag]) -> Result<(), CliError> {
-    let mut root = Cli::command();
-    root.build();
-    let leaf = path.iter().fold(&root, |command, name| {
-        command
-            .find_subcommand(name)
-            .expect("подкоманда есть в дереве")
-    });
-    let flags: Vec<String> = leaf
-        .get_arguments()
-        .flat_map(|arg| {
-            let long = arg.get_long().map(|l| format!("--{l}"));
-            let short = arg.get_short().map(|s| format!("-{s}"));
-            long.into_iter().chain(short)
-        })
-        .collect();
-    for (name, value) in texts {
-        if let Some(value) = value.filter(|v| flags.iter().any(|f| f == v)) {
-            return Err(CliError::usage(
-                "usage",
-                format!("--{name}: значение «{value}» — это флаг; похоже, текст пропущен"),
-            )
-            .with_field(*name)
-            .with_hint(
-                "передайте текст в кавычках; текст, совпадающий с флагом, — ключом в --data",
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn require_review_text(attributes: &Map<String, Value>) -> Result<(), CliError> {
@@ -130,7 +95,7 @@ fn create_flags(args: &CreateReviewArgs) -> Vec<Flag<'_>> {
 fn comment(args: &CommentArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
     check_id(&args.review_id, "review_id")?;
     check_texts(&["reviews", "comment"], &[("text", args.text.as_deref())])?;
-    let (spec, template) = write_operation(Verb::Comment)?;
+    let (spec, template) = write_operation(&resources::REVIEWS, Verb::Comment)?;
     let flags = comment_flags(args);
     let attributes = prepare(spec, spec.required, args.data.as_deref(), &flags, ctx)?;
     let review = &args.review_id;
@@ -143,8 +108,13 @@ fn comment(args: &CommentArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
         None => format!("проверьте, прежде чем повторять: {lookup}"),
     };
     let path = template.replace("{id}", &http::path_segment(review));
-    let request = write::request(spec, path, attributes);
-    execute(request, args.dry.dry_run, &verify, ctx, |created| {
+    let submission = Submission {
+        request: write::request(spec, path, attributes),
+        replay: Replay::OnlyIfUnprocessed,
+        verify,
+        outcome: "created",
+    };
+    execute(submission, args.dry.dry_run, ctx, |created| {
         format!(
             "Комментарий добавлен к отзыву {review}: id {}",
             id_of(created)
@@ -164,84 +134,6 @@ fn comment_flags(args: &CommentArgs) -> Vec<Flag<'_>> {
     ]
 }
 
-/// Схема тела и шаблон пути — из спеки, по операции, которую объявляет `resources` (W6).
-fn write_operation(verb: Verb) -> Result<(&'static WriteSpec, String), CliError> {
-    let (method, path) = verb.operation(&resources::REVIEWS);
-    let spec = spec::write_spec(method, &path).ok_or_else(|| {
-        CliError::general(
-            "internal",
-            format!("в спеке нет схемы тела {method} {path}"),
-        )
-    })?;
-    Ok((spec, path))
-}
-
-/// Всё локальное — до сети: stdin, `--data`, флаги, проверка по схеме (§3).
-fn prepare(
-    spec: &WriteSpec,
-    required: &[&str],
-    data: Option<&Path>,
-    flags: &[Flag],
-    ctx: &Ctx,
-) -> Result<Map<String, Value>, CliError> {
-    write::check_stdin(
-        data,
-        ctx.global.token_stdin,
-        ctx.global.token_file.as_deref(),
-    )?;
-    let data = match data {
-        Some(path) => {
-            let stdin = io::stdin();
-            let is_terminal = stdin.is_terminal();
-            let mut lock = stdin.lock();
-            let mut source = StdinSource {
-                is_terminal,
-                reader: &mut lock,
-            };
-            Some(write::read_data(path, &mut source)?)
-        }
-        None => None,
-    };
-    let attributes = write::attributes(spec, data, flags);
-    write::validate(spec, &attributes, required, flags)?;
-    Ok(attributes)
-}
-
-/// План под `-n` или отправка; `result` одинаковый (W9), токена в нём нет.
-fn execute(
-    request: WriteRequest,
-    dry_run: bool,
-    verify: &str,
-    ctx: &Ctx,
-    done: impl Fn(&Value) -> String,
-) -> Result<Outcome, CliError> {
-    // Токен проверяется и под -n (agent mode §5): план, который упадёт на no_token, бесполезен.
-    let mut api = connect(ctx)?;
-    if dry_run {
-        ctx.reporter.info(&format!(
-            "{DRY_RUN_PREFIX} {} {}",
-            request.method, request.path
-        ));
-        ctx.reporter
-            .info(&serde_json::to_string_pretty(&request.body).expect("JSON сериализуется"));
-        let result = WriteResult {
-            request,
-            created: None,
-        };
-        return Ok(Outcome::stdout(result).with_dry_run(true));
-    }
-    let created = write::submit(&mut api, &request, verify)?;
-    ctx.reporter.info(&done(&created));
-    Ok(Outcome::stdout(WriteResult {
-        request,
-        created: Some(created),
-    }))
-}
-
-fn id_of(record: &Value) -> &str {
-    record_id(record).unwrap_or("?")
-}
-
 #[cfg(test)]
 mod tests {
     use clap::Parser;
@@ -258,14 +150,14 @@ mod tests {
 
     #[test]
     fn every_flag_is_an_attribute_of_the_spec_schema() {
-        let (create_spec, _) = write_operation(Verb::Create).unwrap();
+        let (create_spec, _) = write_operation(&resources::REVIEWS, Verb::Create).unwrap();
         let ReviewsVerb::Create(args) = reviews_verb(&["aplaut", "reviews", "create"]) else {
             panic!("create");
         };
         for (name, _) in create_flags(&args) {
             assert!(create_spec.attribute(name).is_some(), "create --{name}");
         }
-        let (comment_spec, _) = write_operation(Verb::Comment).unwrap();
+        let (comment_spec, _) = write_operation(&resources::REVIEWS, Verb::Comment).unwrap();
         let ReviewsVerb::Comment(args) = reviews_verb(&["aplaut", "reviews", "comment", "r1"])
         else {
             panic!("comment");
