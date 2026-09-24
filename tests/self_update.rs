@@ -398,7 +398,9 @@ fn empty_github_token_sends_no_authorization() {
 }
 
 /// Задача 1 плана: без системных корней сертификатов `reqwest` не собирает клиент, а
-/// `AxoUpdater::new_for` на этом паникует — нужна ошибка с подсказкой, а не паника.
+/// `AxoUpdater::new_for` на этом паникует — нужна ошибка с подсказкой, а не паника. Только Linux:
+/// на macOS корни берутся из Keychain, `SSL_CERT_FILE`/`SSL_CERT_DIR` на них не влияют.
+#[cfg(target_os = "linux")]
 #[test]
 fn missing_system_certificates_is_a_clear_error_not_a_panic() {
     let install = Install::new("self-no-ca");
