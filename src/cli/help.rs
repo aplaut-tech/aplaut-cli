@@ -301,3 +301,41 @@ JSON (--json): не поддерживается — редактору нуже
 config_changed_during_edit, io_error.
 
 Коды выхода: 0 — сохранено или без изменений; 2 — нет терминала; 1 — прочие ошибки.";
+
+pub(super) const PRODUCTS_CREATE_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut products create --external-id 60757 --name \"Transcend StoreJet 1 ТБ\" --url https://shop.example/p/60757 --price 5990 --available true --category-id 297
+  aplaut products create --external-id 60757 --name \"Диск\" --url https://shop.example/p/60757 -n   # показать запрос, не отправляя
+
+  # Для агента: атрибуты — JSON-объектом из stdin, итог — одной строкой JSON в stdout.
+  echo '{\"external_id\":\"60757\",\"name\":\"Диск\",\"url\":\"https://shop.example/p/60757\",\"category_names\":[\"Электроника\",\"Диски\"]}' \\
+    | aplaut products create --data - --json
+
+Атрибуты — из схемы тела POST /products в спеке; флаги перекрывают одноимённые ключи --data.
+Обязательны external_id, name и url (url требует сервер, хотя в спеке он не обязателен).
+Категория — category_names (цепочка имён, через --data), --category-id (external_id категории)
+или --category-name; без них товар попадает в корневую категорию. category_names и
+--category-name создают категорию, если её нет, --brand-name — бренд. picture_urls,
+recommended_product_ids, custom_attributes и даты — через --data.
+С -n (--dry-run) токен проверяется, но запросов нет.
+
+Повторы: CLI повторяет запрос сам, только если сервер его точно не обработал. После
+request_outcome_unknown повтор безопасен: второй товар с тем же external_id сервер не создаст
+(422, external_id is already taken). Проверить — aplaut products get <external_id>.
+
+JSON (--json):
+  {\"ok\":true,\"command\":\"products.create\",\"cli_version\":…,\"dry_run\":false,
+   \"result\":{\"request\":{\"method\":\"POST\",\"path\":\"/products\",
+   \"body\":{\"data\":{\"type\":\"products\",\"attributes\":{…}}}},
+   \"created\":{\"id\",\"type\":\"products\",\"attributes\":{…}}},\"warnings\":[]}
+  С -n — тот же request, \"created\":null и \"dry_run\":true.
+
+Ошибки: unknown_attribute (в hint — допустимые), invalid_attribute, missing_attribute,
+invalid_data, stdin_conflict, stdin_is_terminal, usage (флаг вместо значения --description),
+validation_failed (422; external_id is already taken — товар уже есть, в hint — products update),
+request_outcome_unknown, bad_response, no_token, invalid_token, unauthorized, forbidden,
+rate_limited (retry_after — сколько секунд ждать), server_error, network_error.
+
+Коды выхода: 0 — создан (с -n — план); 2 — ошибка во входных данных, до сети; 3 — нет токена
+или он отклонён; 7 — rate limit, повторы исчерпаны; 1 — прочие ошибки, в том числе
+request_outcome_unknown (повтор безопасен).";

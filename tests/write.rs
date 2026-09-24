@@ -5,45 +5,14 @@ mod support;
 
 use std::time::Duration;
 
-use serde_json::{json, Value};
-use support::{aplaut, MockServer, Output, Reply, TempDir};
-
-const TOKEN: (&str, &str) = ("APLAUT_ACCESS_TOKEN", "tok");
+use serde_json::json;
+use support::{envelope, local_error, run, MockServer, Reply, TempDir};
 
 fn created(kind: &str, id: &str) -> Reply {
     Reply::json(
         201,
         json!({"data": {"id": id, "type": kind, "attributes": {"state": "waiting"}}}).to_string(),
     )
-}
-
-fn run(server: &MockServer, args: &[&str], stdin: &str) -> Output {
-    let home = TempDir::new("write");
-    let url = server.base_url();
-    let mut full = args.to_vec();
-    full.extend(["--base-url", url.as_str()]);
-    aplaut(home.path(), &full, &[TOKEN], stdin)
-}
-
-/// Успех с `--json`: конверт — единственная строка stdout.
-fn envelope(out: &Output) -> Value {
-    assert_eq!(out.code, 0, "{}", out.stderr);
-    serde_json::from_str(out.stdout.trim_end()).unwrap_or_else(|e| panic!("{e}: {}", out.stdout))
-}
-
-/// Ошибка во входных данных: код 2, поле названо, запросов нет.
-fn local_error(server: &MockServer, out: &Output, code: &str, field: &str) {
-    assert_eq!(out.code, 2, "{}", out.stderr);
-    let err = out.error_json();
-    assert_eq!(
-        (
-            err["error"]["code"].as_str(),
-            err["error"]["field"].as_str()
-        ),
-        (Some(code), Some(field)),
-        "{err}"
-    );
-    assert!(server.requests().is_empty(), "ошибка ловится до сети");
 }
 
 #[test]

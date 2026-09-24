@@ -1,6 +1,7 @@
 //! Клей между деревом clap и алгоритмами: сборка зависимостей и сообщения пользователю.
 
 pub mod auth;
+pub mod products;
 pub mod profile;
 pub mod records;
 pub mod reviews;
@@ -16,8 +17,8 @@ use serde::Serialize;
 use crate::api_error::ErrorContext;
 use crate::auth::{EnvSnapshot, StdinSource, TokenFlags, DEFAULT_BASE_URL};
 use crate::cli::{
-    AuthVerb, Command, CommentArgs, CreateReviewArgs, GlobalArgs, ProfileVerb, RecordsVerb,
-    ReviewsVerb,
+    AuthVerb, Command, CommentArgs, CreateProductArgs, CreateReviewArgs, GlobalArgs, ProductsVerb,
+    ProfileVerb, RecordsVerb, ReviewsVerb,
 };
 use crate::clock::Clock;
 use crate::config::{self, Paths};
@@ -105,7 +106,7 @@ pub fn can_prompt(stdin_tty: bool, no_input: bool, json: bool) -> bool {
 pub fn dispatch(command: Command, ctx: &Ctx) -> Result<Outcome, CliError> {
     match command {
         Command::Reviews { verb } => reviews::run(verb, ctx),
-        Command::Products { verb } => records::run(&resources::PRODUCTS, verb, ctx),
+        Command::Products { verb } => products::run(verb, ctx),
         Command::Questions { verb } => records::run(&resources::QUESTIONS, verb, ctx),
         Command::Auth { verb } => auth::run(verb, ctx),
         Command::Profile { verb } => profile::run(verb, ctx),
@@ -127,6 +128,9 @@ pub fn is_dry_run(command: &Command) -> bool {
         }
         | Command::Reviews {
             verb: ReviewsVerb::Comment(CommentArgs { dry, .. }),
+        }
+        | Command::Products {
+            verb: ProductsVerb::Create(CreateProductArgs { dry, .. }),
         } => dry.dry_run,
         _ => false,
     }
@@ -136,7 +140,7 @@ pub fn is_dry_run(command: &Command) -> bool {
 pub fn command_name(command: &Command) -> String {
     let (resource, verb) = match command {
         Command::Reviews { verb } => ("reviews", reviews_verb(verb)),
-        Command::Products { verb } => ("products", records_verb(verb)),
+        Command::Products { verb } => ("products", products_verb(verb)),
         Command::Questions { verb } => ("questions", records_verb(verb)),
         Command::Auth { verb } => (
             "auth",
@@ -157,6 +161,13 @@ pub fn command_name(command: &Command) -> String {
         ),
     };
     format!("{resource}.{verb}")
+}
+
+fn products_verb(verb: &ProductsVerb) -> &'static str {
+    match verb {
+        ProductsVerb::Records(verb) => records_verb(verb),
+        ProductsVerb::Create(_) => "create",
+    }
 }
 
 fn reviews_verb(verb: &ReviewsVerb) -> &'static str {

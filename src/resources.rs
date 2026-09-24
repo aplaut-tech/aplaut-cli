@@ -49,7 +49,7 @@ pub static REVIEWS: Resource = Resource {
 pub static PRODUCTS: Resource = Resource {
     name: "products",
     records_type: "products",
-    verbs: &[Verb::Scroll, Verb::Get],
+    verbs: &[Verb::Scroll, Verb::Get, Verb::Create],
 };
 pub static QUESTIONS: Resource = Resource {
     name: "questions",

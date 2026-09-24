@@ -158,6 +158,16 @@ aplaut reviews comment crm-4211 --text "Спасибо за отзыв!"
   `request_outcome_unknown`: проверьте, создан ли отзыв, прежде чем повторять. Передавайте
   `--external-id` — тогда проверка — `aplaut reviews get <external_id>`.
 
+## Создание и изменение товаров
+
+```bash
+aplaut products create --external-id 60757 --name "Transcend StoreJet 1 ТБ" --url https://shop.example/p/60757 --price 5990 --category-id 297
+```
+
+- У `create` обязательны `external_id`, `name` и `url`. Второй товар с тем же `external_id` сервер не
+  создаст (422 `is already taken`), поэтому повтор после сбоя безопасен.
+- `-n` показывает метод, путь и тело запроса и ничего не отправляет.
+
 ## Форматы
 
 | `--format` | Что в stdout |

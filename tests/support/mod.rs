@@ -398,3 +398,33 @@ pub fn spawn(home: &Path, args: &[&str], env: &[(&str, &str)]) -> std::process::
         .stderr(Stdio::piped());
     cmd.spawn().expect("запуск aplaut")
 }
+
+/// Команда против мок-сервера с токеном из окружения; stdin — строка.
+pub fn run(server: &MockServer, args: &[&str], stdin: &str) -> Output {
+    let home = TempDir::new("write");
+    let url = server.base_url();
+    let mut full = args.to_vec();
+    full.extend(["--base-url", url.as_str()]);
+    aplaut(home.path(), &full, &[("APLAUT_ACCESS_TOKEN", "tok")], stdin)
+}
+
+/// Успех с `--json`: конверт — единственная строка stdout.
+pub fn envelope(out: &Output) -> serde_json::Value {
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    serde_json::from_str(out.stdout.trim_end()).unwrap_or_else(|e| panic!("{e}: {}", out.stdout))
+}
+
+/// Ошибка во входных данных: код 2, поле названо, запросов нет.
+pub fn local_error(server: &MockServer, out: &Output, code: &str, field: &str) {
+    assert_eq!(out.code, 2, "{}", out.stderr);
+    let err = out.error_json();
+    assert_eq!(
+        (
+            err["error"]["code"].as_str(),
+            err["error"]["field"].as_str()
+        ),
+        (Some(code), Some(field)),
+        "{err}"
+    );
+    assert!(server.requests().is_empty(), "ошибка ловится до сети");
+}

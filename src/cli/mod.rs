@@ -90,7 +90,7 @@ pub enum Command {
     #[command(arg_required_else_help = true)]
     Products {
         #[command(subcommand)]
-        verb: RecordsVerb,
+        verb: ProductsVerb,
     },
     /// Вопросы
     #[command(arg_required_else_help = true)]
@@ -110,6 +110,63 @@ pub enum Command {
         #[command(subcommand)]
         verb: ProfileVerb,
     },
+}
+
+/// У товаров, кроме общих глаголов чтения, есть запись (спека products-write P1).
+#[derive(Debug, Subcommand)]
+pub enum ProductsVerb {
+    #[command(flatten)]
+    Records(RecordsVerb),
+    /// Создать товар (POST /products): атрибуты флагами или JSON-объектом в --data
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = PRODUCTS_CREATE_AFTER_LONG_HELP)]
+    Create(CreateProductArgs),
+}
+
+/// Атрибуты товара, общие для create и update (спека products-write §1). Описание может
+/// начинаться с `-` (список), поэтому у него `allow_hyphen_values`.
+#[derive(Debug, Clone, Args)]
+pub struct ProductFields {
+    /// Название
+    #[arg(long, value_name = "TEXT")]
+    pub name: Option<String>,
+    /// URL карточки товара
+    #[arg(long, value_name = "URL")]
+    pub url: Option<String>,
+    /// Цена, число
+    #[arg(long, value_name = "N")]
+    pub price: Option<String>,
+    /// Наличие: true или false
+    #[arg(long, value_name = "true|false")]
+    pub available: Option<String>,
+    /// Описание
+    #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+    pub description: Option<String>,
+    /// Внешний идентификатор группы (варианты одного товара)
+    #[arg(long, value_name = "ID")]
+    pub group_id: Option<String>,
+    /// Категория по external_id (из YML)
+    #[arg(long, value_name = "ID")]
+    pub category_id: Option<String>,
+    /// Категория по имени; нет такой — будет создана
+    #[arg(long, value_name = "TEXT")]
+    pub category_name: Option<String>,
+    /// Бренд по имени; нет такого — будет создан
+    #[arg(long, value_name = "TEXT")]
+    pub brand_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct CreateProductArgs {
+    /// Id товара в вашей системе (обычно offer.id из YML); обязателен
+    #[arg(long, value_name = "ID")]
+    pub external_id: Option<String>,
+    #[command(flatten)]
+    pub fields: ProductFields,
+    /// Атрибуты JSON-объектом из файла (`-` — из stdin); флаги перекрывают его ключи
+    #[arg(long, value_name = "FILE|-")]
+    pub data: Option<PathBuf>,
+    #[command(flatten)]
+    pub dry: DryRun,
 }
 
 /// У отзывов, кроме общих глаголов чтения, есть запись (спека reviews-write W1).
