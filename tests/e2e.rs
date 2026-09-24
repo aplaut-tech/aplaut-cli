@@ -4,8 +4,8 @@
 //!   APLAUT_ACCESS_TOKEN_FILE=… cargo test --test e2e -- --ignored --test-threads=1
 //!
 //! Токен — из APLAUT_ACCESS_TOKEN_FILE или APLAUT_ACCESS_TOKEN; адрес стенда в коде не хранится.
-//! Круг записи (`review_write_round_trip`) создаёт и удаляет тестовый отзыв — только с
-//! APLAUT_E2E_WRITES=1.
+//! Круги записи (`review_write_round_trip`, `product_write_round_trip`) создают и удаляют
+//! тестовые объекты — только с APLAUT_E2E_WRITES=1.
 
 mod support;
 
@@ -142,13 +142,12 @@ fn wrong_token_is_exit_3_with_request_id() {
 #[test]
 #[ignore]
 fn review_write_round_trip() {
-    if std::env::var("APLAUT_E2E_WRITES").as_deref() != Ok("1") {
-        eprintln!("пропущено: запись на стенд — только с APLAUT_E2E_WRITES=1");
+    if !writes_enabled() {
         return;
     }
     let external_id = format!("aplaut-cli-test-{}", unix_seconds());
     // Guard — до создания: удаляет по внешнему id, даже если ответ на create не разобрался.
-    let _cleanup = Cleanup(external_id.clone());
+    let _cleanup = Cleanup(format!("reviews/{external_id}"));
     let out = run(&[
         "reviews",
         "create",
@@ -197,6 +196,53 @@ fn review_write_round_trip() {
     assert_eq!(comment["result"]["created"]["type"], "comments");
 }
 
+/// Круг записи товара (спека products-write §5): создать → изменить цену → get: цена новая,
+/// название прежнее (PUT частичный) → удалить в guard. Без категории и бренда: их API не удаляет.
+#[test]
+#[ignore]
+fn product_write_round_trip() {
+    if !writes_enabled() {
+        return;
+    }
+    let external_id = format!("aplaut-cli-test-{}", unix_seconds());
+    let _cleanup = Cleanup(format!("products/{external_id}"));
+    let out = run(&[
+        "products",
+        "create",
+        "--external-id",
+        &external_id,
+        "--name",
+        "aplaut-cli test",
+        "--url",
+        "https://example.com/aplaut-cli-test",
+        "--price",
+        "1",
+        "--available",
+        "false",
+        "--json",
+    ]);
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    let out = run(&["products", "update", &external_id, "--price", "2", "--json"]);
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    let out = run(&["products", "get", &external_id, "--format", "jsonl"]);
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    let record: serde_json::Value = serde_json::from_str(out.stdout.trim_end()).unwrap();
+    assert_eq!(record["attributes"]["price"], 2.0);
+    assert_eq!(
+        record["attributes"]["name"], "aplaut-cli test",
+        "PUT частичный"
+    );
+}
+
+/// Запись на стенд — только с APLAUT_E2E_WRITES=1.
+fn writes_enabled() -> bool {
+    let enabled = std::env::var("APLAUT_E2E_WRITES").as_deref() == Ok("1");
+    if !enabled {
+        eprintln!("пропущено: запись на стенд — только с APLAUT_E2E_WRITES=1");
+    }
+    enabled
+}
+
 fn unix_seconds() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -204,12 +250,13 @@ fn unix_seconds() -> u64 {
         .as_secs()
 }
 
-/// Удаляет тестовый отзыв по внешнему id. Токен — из окружения теста, не из argv.
+/// Удаляет тестовый объект по пути от base URL (`reviews/<external_id>`). Токен — из окружения
+/// теста, не из argv.
 struct Cleanup(String);
 
 impl Drop for Cleanup {
     fn drop(&mut self) {
-        let url = format!("{}/reviews/{}", base_url(), self.0);
+        let url = format!("{}/{}", base_url(), self.0);
         let result = ureq::delete(&url)
             .header("Authorization", format!("Bearer {}", token()))
             .header("Accept", "application/vnd.api+json")
@@ -217,7 +264,7 @@ impl Drop for Cleanup {
         match result {
             Ok(_) | Err(ureq::Error::StatusCode(404)) => {}
             Err(err) => eprintln!(
-                "НЕ УДАЛЁН тестовый отзыв {}: {err} — удалите вручную",
+                "НЕ УДАЛЁН тестовый объект {}: {err} — удалите вручную",
                 self.0
             ),
         }
