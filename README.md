@@ -329,5 +329,5 @@ APLAUT_E2E_WRITES=1 …  # то же плюс круги записи: созд�
 dist plan               # что соберёт релиз; релиз — push тега vX.Y.Z
 ```
 
-Спека API вендорится в `spec/api.yaml` (см. `spec/README.md`); дизайн — в `docs/superpowers/specs/`.
+Спека API вендорится в `spec/api.yaml` (см. `spec/README.md`).
 Поддержка: support@aplaut.com.
