@@ -9,9 +9,9 @@
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/aplaut-tech/aplaut-cli/releases/latest/download/aplaut-cli-installer.sh | sh
 ```
 
-Установщик скачивает бинарь под вашу систему — Linux x86-64 (статический, работает на любом
-дистрибутиве, без зависимостей) или macOS (Apple Silicon и Intel), — сверяет его sha256 и кладёт
-`aplaut` в `~/.local/bin`. Если этого каталога нет в
+Установщик скачивает бинарь под вашу систему — Linux x86-64 или ARM64 (статический, работает на
+любом дистрибутиве, без зависимостей) или macOS (Apple Silicon и Intel), — сверяет его sha256 и
+кладёт `aplaut` в `~/.local/bin`. Если этого каталога нет в
 `PATH`, установщик добавит строку `. "$HOME/.config/aplaut-cli/env.sh"` в `~/.profile` и
 `~/.zshrc` — перезапустите шелл или выполните её вручную. Скрипт на POSIX sh, `| bash` тоже подходит.
 
@@ -31,8 +31,8 @@ curl … | APLAUT_CLI_NO_MODIFY_PATH=1 sh
 ```
 
 Без `curl | sh`: скачайте со страницы релизов архив под свою систему
-(`aplaut-cli-x86_64-unknown-linux-musl.tar.xz`, `aplaut-cli-aarch64-apple-darwin.tar.xz` или
-`aplaut-cli-x86_64-apple-darwin.tar.xz`) и его `.sha256`, проверьте `sha256sum -c` (на macOS —
+(`aplaut-cli-x86_64-unknown-linux-musl.tar.xz`, `aplaut-cli-aarch64-unknown-linux-musl.tar.xz`,
+`aplaut-cli-aarch64-apple-darwin.tar.xz` или `aplaut-cli-x86_64-apple-darwin.tar.xz`) и его `.sha256`, проверьте `sha256sum -c` (на macOS —
 `shasum -a 256 -c`) и распакуйте. Проверка sha256 защищает от битой загрузки, происхождение
 бинаря подтверждает attestation (у релизов начиная с 0.3.0):
 `gh attestation verify aplaut-cli-x86_64-unknown-linux-musl.tar.xz -R aplaut-tech/aplaut-cli`.
