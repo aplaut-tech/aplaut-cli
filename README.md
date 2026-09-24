@@ -17,7 +17,7 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/aplaut-tech/aplaut-cli/
 Конкретная версия — тот же скрипт из нужного релиза:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/aplaut-tech/aplaut-cli/releases/download/v0.1.0/aplaut-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/aplaut-tech/aplaut-cli/releases/download/v0.2.0/aplaut-cli-installer.sh | sh
 ```
 
 Серверы, контейнеры и CI — без правки профиля шелла:
@@ -236,10 +236,10 @@ aplaut products update 60757 --price 5490 --available true
 | `--dry-run` (`-n`) | у `profile set/delete`, `auth login/logout`, `reviews create/comment`, `products create/update`, `self update`: всё проверить и вернуть план в `result`, ничего не меняя |
 
 ```json
-{"ok":true,"command":"profile.set","cli_version":"0.1.0","dry_run":false,
+{"ok":true,"command":"profile.set","cli_version":"0.2.0","dry_run":false,
  "result":{"profile":"staging","created":true,"changes":[{"field":"base_url","from":null,"to":"https://…"}],"config_path":"…"},
  "warnings":[]}
-{"ok":false,"command":"reviews.scroll","cli_version":"0.1.0","dry_run":false,
+{"ok":false,"command":"reviews.scroll","cli_version":"0.2.0","dry_run":false,
  "error":{"code":"rate_limited","message":"…","field":null,"retryable":true,"retry_after":30,"hint":"…","request_id":"…"},
  "warnings":[{"code":"default_filter","message":"…"}]}
 ```

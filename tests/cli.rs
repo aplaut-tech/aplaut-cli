@@ -7,7 +7,7 @@ fn version_shows_cli_and_spec_versions() {
     let home = TempDir::new("version");
     let out = aplaut(home.path(), &["--version"], &[], "");
     assert_eq!(out.code, 0, "{}", out.stderr);
-    assert_eq!(out.stdout, "aplaut 0.1.0 (Platform API 4.1.0)\n");
+    assert_eq!(out.stdout, "aplaut 0.2.0 (Platform API 4.1.0)\n");
 }
 
 #[test]
