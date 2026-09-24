@@ -16,6 +16,14 @@ const TOKEN: &str = "tok-secret-123";
 const NOW: i64 = 1_790_158_269_000;
 
 fn client(server: &MockServer, max_retries: u32) -> (ApiClient, Rc<FakeClock>, SharedBuf) {
+    client_with_timeout(server, max_retries, Duration::from_secs(5))
+}
+
+fn client_with_timeout(
+    server: &MockServer,
+    max_retries: u32,
+    timeout: Duration,
+) -> (ApiClient, Rc<FakeClock>, SharedBuf) {
     let clock = Rc::new(FakeClock::new(NOW));
     let log = SharedBuf::default();
     let reporter = Rc::new(Reporter::with_writer(
@@ -27,7 +35,7 @@ fn client(server: &MockServer, max_retries: u32) -> (ApiClient, Rc<FakeClock>, S
     ));
     let settings = HttpSettings {
         base_url: server.base_url(),
-        timeout: Duration::from_secs(5),
+        timeout,
         max_retries,
     };
     let ctx = ErrorContext {
@@ -320,4 +328,105 @@ fn continuation_is_replayed_after_429_and_503() {
         .requests()
         .iter()
         .all(|r| r.query_param("cursor") == Some("c1")));
+}
+
+// Запись не идемпотентна: повтор POST, который сервер мог обработать, создал бы дубль.
+
+fn review_doc() -> serde_json::Value {
+    serde_json::json!({"data": {"type": "reviews", "attributes": {"rating": 5}}})
+}
+
+#[test]
+fn post_sends_json_body_with_content_type_and_logs_it_masked() {
+    let server = MockServer::start(vec![Reply::json(
+        201,
+        r#"{"data":{"id":"c1","type":"comments"}}"#,
+    )]);
+    let (mut api, _, log) = client(&server, 0);
+    let body = serde_json::json!({"data": {"type": "comments", "attributes": {"text": "Спасибо, \"друг\"\nи до встречи"}}});
+    let resp = api
+        .post("/reviews/r1/relationships/comments", &body)
+        .unwrap();
+    assert_eq!(resp.status, 201);
+    let req = &server.requests()[0];
+    assert_eq!(
+        (req.method.as_str(), req.path.as_str()),
+        ("POST", "/v4/reviews/r1/relationships/comments")
+    );
+    assert_eq!(req.header("content-type"), Some("application/json"));
+    assert_eq!(req.header("accept"), Some("application/vnd.api+json"));
+    assert_eq!(
+        req.header("authorization"),
+        Some(format!("Bearer {TOKEN}").as_str())
+    );
+    assert_eq!(
+        req.json(),
+        body,
+        "тело — ровно этот документ, UTF-8 без искажений"
+    );
+    let log = log.contents();
+    assert!(
+        log.contains("→ POST") && log.contains("Content-Type: application/json"),
+        "{log}"
+    );
+    assert!(log.contains("body: {") && log.contains("Спасибо"), "{log}");
+    assert!(!log.contains(TOKEN), "{log}");
+}
+
+#[test]
+fn post_is_replayed_only_after_429_and_503() {
+    let server = MockServer::start(vec![
+        Reply::text(429, "Throttled\n").with_header("Retry-After", "1"),
+        Reply::text(503, "").with_header("Retry-After", "1"),
+        Reply::json(201, r#"{"data":{"id":"r1","type":"reviews"}}"#),
+    ]);
+    let (mut api, _, _) = client(&server, 6);
+    api.post("/reviews", &review_doc()).unwrap();
+    let requests = server.requests();
+    assert_eq!(requests.len(), 3);
+    assert!(requests.iter().all(|r| r.json() == review_doc()));
+}
+
+#[test]
+fn post_is_not_replayed_when_the_server_may_have_processed_it() {
+    for (reply, what) in [
+        (Reply::text(500, "oops"), "500"),
+        (Reply::text(502, "bad gateway"), "502"),
+        (Reply::Hangup, "обрыв после отправки"),
+    ] {
+        let server = MockServer::start(vec![reply, Reply::json(201, "{}")]);
+        let (mut api, _, _) = client(&server, 6);
+        let err = api.post("/reviews", &review_doc()).unwrap_err();
+        assert_eq!(err.code, aplaut_cli::http::OUTCOME_UNKNOWN, "{what}");
+        assert!(!err.retryable, "{what}");
+        assert_eq!(server.requests().len(), 1, "{what}");
+    }
+}
+
+#[test]
+fn post_timeout_is_outcome_unknown_without_replay() {
+    let server = MockServer::start(vec![
+        Reply::Stall(Duration::from_millis(800)),
+        Reply::json(201, "{}"),
+    ]);
+    let (mut api, _, _) = client_with_timeout(&server, 6, Duration::from_millis(200));
+    let err = api.post("/reviews", &review_doc()).unwrap_err();
+    assert_eq!(err.code, aplaut_cli::http::OUTCOME_UNKNOWN);
+    assert!(err.message.contains("неизвестно"), "{}", err.message);
+    assert_eq!(server.requests().len(), 1);
+}
+
+#[test]
+fn post_422_is_validation_failed_with_field() {
+    let server = MockServer::start(vec![Reply::json(
+        422,
+        r#"{"errors":{"status":422,"title":"Validation failed","details":{"rating":["must be less than or equal to 5"]}}}"#,
+    )]);
+    let (mut api, _, _) = client(&server, 6);
+    let err = api.post("/reviews", &review_doc()).unwrap_err();
+    assert_eq!(
+        (err.code.as_str(), err.field.as_deref(), err.exit),
+        ("validation_failed", Some("rating"), Exit::General)
+    );
+    assert_eq!(server.requests().len(), 1);
 }

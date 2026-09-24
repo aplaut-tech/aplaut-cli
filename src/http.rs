@@ -3,6 +3,7 @@
 //! Лимиты API жёсткие: 2 запроса/с на IP, а для scroll ещё 1 запрос / 2 с и 5 открытий в
 //! минуту на ключ. Троттлинг проактивный: 429 — исключение, а не способ узнать лимит.
 
+use std::fmt::Write as _;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -14,6 +15,9 @@ use crate::term::Reporter;
 use crate::time;
 
 const ACCEPT: &str = "application/vnd.api+json";
+/// Тело записи — по спеке: у `requestBody` операций записи `application/json`
+/// (вступление спеки просит `application/vnd.api+json`; см. §15 дизайна среза 1).
+const CONTENT_TYPE: &str = "application/json";
 /// Страница scroll на 100 записей — сотни килобайт; 64 МБ — защита от бесконечного тела.
 const MAX_BODY_BYTES: u64 = 64 * 1024 * 1024;
 /// 2 запроса в секунду с IP.
@@ -33,11 +37,36 @@ pub const OUTCOME_UNKNOWN: &str = "request_outcome_unknown";
 
 /// Можно ли повторить запрос. Курсор scroll не идемпотентен (стейджинг, 2026-09-23): повтор
 /// тем же курсором отдаёт *следующую* страницу, поэтому продолжение обхода повторяется только
-/// тогда, когда сервер его точно не обработал — иначе страница молча пропадёт.
+/// тогда, когда сервер его точно не обработал — иначе страница молча пропадёт. Так же
+/// повторяется запись (POST): идемпотентности у API нет.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Replay {
     Safe,
     OnlyIfUnprocessed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Method {
+    Get,
+    Post,
+}
+
+impl Method {
+    fn as_str(self) -> &'static str {
+        match self {
+            Method::Get => "GET",
+            Method::Post => "POST",
+        }
+    }
+}
+
+/// Один запрос: метод, путь от base URL, query и тело.
+#[derive(Clone, Copy)]
+struct Call<'a> {
+    method: Method,
+    path: &'a str,
+    query: &'a [(&'a str, &'a str)],
+    body: Option<&'a [u8]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,7 +148,13 @@ impl ApiClient {
         query: &[(&str, &str)],
         pace: Pace,
     ) -> Result<ApiResponse, CliError> {
-        self.request(path, query, pace, Replay::Safe)
+        let call = Call {
+            method: Method::Get,
+            path,
+            query,
+            body: None,
+        };
+        self.request(call, pace, Replay::Safe)
     }
 
     /// Продолжение обхода по курсору: повторяется только после 429, 503 и ошибок соединения,
@@ -129,26 +164,41 @@ impl ApiClient {
         path: &str,
         query: &[(&str, &str)],
     ) -> Result<ApiResponse, CliError> {
-        self.request(path, query, Pace::Scroll, Replay::OnlyIfUnprocessed)
+        let call = Call {
+            method: Method::Get,
+            path,
+            query,
+            body: None,
+        };
+        self.request(call, Pace::Scroll, Replay::OnlyIfUnprocessed)
+    }
+
+    /// Запись не идемпотентна (спека reviews-write W7): повтор — только после 429, 503 и
+    /// ошибок соединения, до которых запрос не ушёл; иначе — ошибка `OUTCOME_UNKNOWN`.
+    pub fn post(&mut self, path: &str, body: &serde_json::Value) -> Result<ApiResponse, CliError> {
+        let bytes = serde_json::to_vec(body).expect("JSON сериализуется");
+        let call = Call {
+            method: Method::Post,
+            path,
+            query: &[],
+            body: Some(&bytes),
+        };
+        self.request(call, Pace::Default, Replay::OnlyIfUnprocessed)
     }
 
     fn request(
         &mut self,
-        path: &str,
-        query: &[(&str, &str)],
+        call: Call<'_>,
         pace: Pace,
         replay: Replay,
     ) -> Result<ApiResponse, CliError> {
-        let url = format!("{}{}", self.settings.base_url, path);
+        let url = format!("{}{}", self.settings.base_url, call.path);
         let mut attempt = 0u32;
         loop {
             self.throttle(pace);
-            self.reporter
-                .debug(&format!("→ GET {}", describe(&url, query)));
-            self.reporter
-                .debug(&format!("  Authorization: Bearer {MASK}, Accept: {ACCEPT}"));
+            self.log_request(&url, &call);
             let started = self.clock.elapsed();
-            let delay = match self.send(&url, query) {
+            let delay = match self.send(&url, &call) {
                 Ok(resp) => {
                     self.reporter.debug(&format!(
                         "← {} за {} мс, {} Б{}",
@@ -208,16 +258,38 @@ impl ApiClient {
         }
     }
 
-    fn send(&self, url: &str, query: &[(&str, &str)]) -> Result<RawResponse, ureq::Error> {
-        let mut request = self
-            .agent
-            .get(url)
-            .header("Authorization", format!("Bearer {}", self.token.expose()))
-            .header("Accept", ACCEPT);
-        for (key, value) in query {
-            request = request.query(*key, *value);
+    fn log_request(&self, url: &str, call: &Call) {
+        if !self.reporter.is_verbose() {
+            return;
         }
-        let mut response = request.call()?;
+        self.reporter.debug(&format!(
+            "→ {} {}",
+            call.method.as_str(),
+            describe(url, call.query)
+        ));
+        let content_type = call
+            .body
+            .map(|_| format!(", Content-Type: {CONTENT_TYPE}"))
+            .unwrap_or_default();
+        self.reporter.debug(&format!(
+            "  Authorization: Bearer {MASK}, Accept: {ACCEPT}{content_type}"
+        ));
+        if let Some(body) = call.body {
+            self.reporter.debug(&format!(
+                "  body: {}",
+                self.token.redact(&String::from_utf8_lossy(body))
+            ));
+        }
+    }
+
+    fn send(&self, url: &str, call: &Call) -> Result<RawResponse, ureq::Error> {
+        let mut response = match call.method {
+            Method::Get => self.prepare(self.agent.get(url), call.query).call()?,
+            Method::Post => self
+                .prepare(self.agent.post(url), call.query)
+                .header("Content-Type", CONTENT_TYPE)
+                .send(call.body.unwrap_or_default())?,
+        };
         let status = response.status().as_u16();
         let headers = {
             let h = response.headers();
@@ -245,6 +317,21 @@ impl ApiClient {
             headers,
             body,
         })
+    }
+
+    /// Заголовки и query, общие для всех методов.
+    fn prepare<B>(
+        &self,
+        request: ureq::RequestBuilder<B>,
+        query: &[(&str, &str)],
+    ) -> ureq::RequestBuilder<B> {
+        let mut request = request
+            .header("Authorization", format!("Bearer {}", self.token.expose()))
+            .header("Accept", ACCEPT);
+        for (key, value) in query {
+            request = request.query(*key, *value);
+        }
+        request
     }
 
     fn throttle(&mut self, pace: Pace) {
@@ -398,6 +485,20 @@ fn describe(url: &str, query: &[(&str, &str)]) -> String {
     format!("{url}?{}", parts.join("&"))
 }
 
+/// Идентификатор — один сегмент пути: внешний id из системы пользователя может содержать `/`,
+/// `?`, пробелы и кириллицу. Кодируется всё, кроме unreserved (RFC 3986).
+pub fn path_segment(id: &str) -> String {
+    let mut out = String::with_capacity(id.len());
+    for byte in id.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+            out.push(byte as char);
+        } else {
+            let _ = write!(out, "%{byte:02X}");
+        }
+    }
+    out
+}
+
 /// xorshift64*: джиттеру нужна только разница между процессами, криптостойкость не нужна.
 struct Jitter(u64);
 
@@ -435,6 +536,13 @@ mod tests {
             Some(Duration::from_secs(1))
         );
         assert_eq!(rate_limit_delay(&ResponseHeaders::default(), 0), None);
+    }
+
+    #[test]
+    fn path_segment_keeps_unreserved_and_encodes_the_rest() {
+        assert_eq!(path_segment("review-34772_a.b~"), "review-34772_a.b~");
+        assert_eq!(path_segment("a/b c?d#e"), "a%2Fb%20c%3Fd%23e");
+        assert_eq!(path_segment("отз"), "%D0%BE%D1%82%D0%B7");
     }
 
     #[test]

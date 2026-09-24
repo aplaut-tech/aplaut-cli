@@ -77,7 +77,7 @@ pub fn aplaut(home: &Path, args: &[&str], env: &[(&str, &str)], stdin: &str) -> 
     }
 }
 
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -90,6 +90,7 @@ pub struct RecordedRequest {
     pub path: String,
     pub query: Vec<(String, String)>,
     pub headers: Vec<(String, String)>,
+    pub body: String,
 }
 
 impl RecordedRequest {
@@ -111,6 +112,12 @@ impl RecordedRequest {
     pub fn query_keys(&self) -> Vec<&str> {
         self.query.iter().map(|(k, _)| k.as_str()).collect()
     }
+
+    /// Тело запроса как JSON (POST).
+    pub fn json(&self) -> serde_json::Value {
+        serde_json::from_str(&self.body)
+            .unwrap_or_else(|e| panic!("тело запроса не JSON ({e}): {}", self.body))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -122,6 +129,8 @@ pub enum Reply {
     },
     /// Закрыть соединение, не ответив: так выглядит обрыв сети для клиента.
     Hangup,
+    /// Принять запрос и молчать, затем закрыть соединение: так клиент видит таймаут.
+    Stall(Duration),
 }
 
 impl Reply {
@@ -158,7 +167,7 @@ impl Reply {
                     body,
                 }
             }
-            Reply::Hangup => Reply::Hangup,
+            other => other,
         }
     }
 }
@@ -196,6 +205,7 @@ impl MockServer {
                         body,
                     }) => write_response(&mut stream, status, &headers, &body),
                     Some(Reply::Hangup) => {}
+                    Some(Reply::Stall(pause)) => std::thread::sleep(pause),
                     None => write_response(&mut stream, 599, &[], b"mock: no more replies"),
                 }
             }
@@ -254,6 +264,13 @@ fn read_request(stream: &mut TcpStream) -> Option<RecordedRequest> {
             headers.push((k.trim().to_ascii_lowercase(), v.trim().to_string()));
         }
     }
+    let length = headers
+        .iter()
+        .find(|(k, _): &&(String, String)| k == "content-length")
+        .and_then(|(_, v)| v.parse::<usize>().ok())
+        .unwrap_or(0);
+    let mut body = vec![0; length];
+    reader.read_exact(&mut body).ok()?;
     let (path, query) = match target.split_once('?') {
         Some((p, q)) => (p.to_string(), parse_query(q)),
         None => (target, Vec::new()),
@@ -263,6 +280,7 @@ fn read_request(stream: &mut TcpStream) -> Option<RecordedRequest> {
         path,
         query,
         headers,
+        body: String::from_utf8_lossy(&body).into_owned(),
     })
 }
 
@@ -284,6 +302,7 @@ fn write_response(stream: &mut TcpStream, status: u16, headers: &[(String, Strin
 fn reason(status: u16) -> &'static str {
     match status {
         200 => "OK",
+        201 => "Created",
         302 => "Found",
         400 => "Bad Request",
         401 => "Unauthorized",
