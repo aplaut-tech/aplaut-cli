@@ -85,7 +85,7 @@ const ROOT_AFTER_LONG_HELP: &str = "\
                 {\"ok\":true,\"command\":…,\"cli_version\":…,\"dry_run\":false,\"result\":…,\"warnings\":[…]}
                 {\"ok\":false,…,\"error\":{\"code\",\"message\",\"field\",\"retryable\",\"retry_after\",
                  \"hint\",\"request_id\"},\"warnings\":[…]}
-              итог — в stdout (у scroll — в stderr: stdout занят данными), ошибка — в stderr;
+              итог — в stdout (у scroll и get — в stderr: stdout занят данными), ошибка — в stderr;
               предупреждения — в warnings с кодами, а не текстом; включает --no-input
   --no-input  ничего не спрашивать: вместо вопроса — ошибка с подсказкой, какой флаг передать
   --yes       подтвердить удаление без вопроса (profile delete)
@@ -111,7 +111,8 @@ const GET_AFTER_LONG_HELP: &str = "\
   # Для агента: запись — в stdout, итог — одной строкой JSON в stderr.
   aplaut reviews get crm-4211 --include comments --format jsonl --json
 
-ID — внутренний идентификатор или external_id. --include по ресурсу (проверяется до запроса):
+ID — внутренний идентификатор или external_id (без «.» и «/»: API такие id в пути обрезает
+или не находит). --include по ресурсу (проверяется до запроса):
   reviews    author, product, comments, state_changes
   products   reviews_summary_item, reviews, questions, brand, category
   questions  author, product, answers
@@ -149,7 +150,7 @@ dimensions, custom_attributes, даты, hide_my_data и т. д. Недосту�
 
 Повторы: CLI повторяет запрос сам, только если сервер его точно не обработал (429, 503,
 соединение не установилось). Иначе — request_outcome_unknown: проверьте, создан ли отзыв,
-прежде чем повторять. С --external-id проверка — aplaut reviews get <external_id>.
+прежде чем повторять. С --external-id (без «.» и «/») проверка — aplaut reviews get <external_id>.
 
 JSON (--json):
   {\"ok\":true,\"command\":\"reviews.create\",\"cli_version\":…,\"dry_run\":false,
@@ -176,7 +177,7 @@ const REVIEWS_COMMENT_AFTER_LONG_HELP: &str = "\
   aplaut reviews comment crm-4211 --text \"Спасибо за отзыв!\" --external-id reply-crm-4211 -n --json
   aplaut reviews comment crm-4211 --text \"Спасибо за отзыв!\" --external-id reply-crm-4211 --json
 
-REVIEW_ID — внутренний идентификатор отзыва или его external_id. Атрибуты — из схемы тела
+REVIEW_ID — внутренний идентификатор отзыва или его external_id (без «.» и «/»). Атрибуты — из схемы тела
 POST /reviews/{id}/relationships/comments; через --data — остальные (files, hide_my_data,
 author_external_id, external_parent_id, …); флаги перекрывают одноимённые ключи --data.
 С -n (--dry-run) токен проверяется, но запросов нет.
@@ -370,7 +371,7 @@ pub struct GlobalArgs {
     /// Таймаут одного запроса, секунд
     #[arg(long, global = true, value_name = "SECONDS", default_value_t = 30)]
     pub timeout: u64,
-    /// Сколько раз повторять запрос после 429, 5xx и сетевых сбоев
+    /// Сколько раз повторять запрос после 429, 5xx и сетевых сбоев (запись — только если сервер её точно не получил)
     #[arg(long, global = true, value_name = "N", default_value_t = 6)]
     pub max_retries: u32,
 }

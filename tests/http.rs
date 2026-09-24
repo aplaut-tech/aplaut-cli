@@ -24,6 +24,14 @@ fn client_with_timeout(
     max_retries: u32,
     timeout: Duration,
 ) -> (ApiClient, Rc<FakeClock>, SharedBuf) {
+    client_at(server.base_url(), max_retries, timeout)
+}
+
+fn client_at(
+    base_url: String,
+    max_retries: u32,
+    timeout: Duration,
+) -> (ApiClient, Rc<FakeClock>, SharedBuf) {
     let clock = Rc::new(FakeClock::new(NOW));
     let log = SharedBuf::default();
     let reporter = Rc::new(Reporter::with_writer(
@@ -34,13 +42,13 @@ fn client_with_timeout(
         Box::new(log.clone()),
     ));
     let settings = HttpSettings {
-        base_url: server.base_url(),
+        base_url: base_url.clone(),
         timeout,
         max_retries,
     };
     let ctx = ErrorContext {
         token_source: "APLAUT_ACCESS_TOKEN".into(),
-        base_url: server.base_url(),
+        base_url,
     };
     (
         ApiClient::new(settings, Secret::new(TOKEN), ctx, clock.clone(), reporter),
@@ -429,4 +437,28 @@ fn post_422_is_validation_failed_with_field() {
         ("validation_failed", Some("rating"), Exit::General)
     );
     assert_eq!(server.requests().len(), 1);
+}
+
+/// Отказ в соединении — запрос точно не ушёл (W7): POST и продолжение обхода повторяются, а
+/// итог — `network_error`, а не «исход неизвестен».
+#[test]
+fn refused_connection_is_never_sent_so_it_is_retried() {
+    let port = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    };
+    let base_url = format!("http://127.0.0.1:{port}/v4");
+    let (mut api, clock, _) = client_at(base_url.clone(), 2, Duration::from_secs(5));
+    let err = api.post("/reviews", &review_doc()).unwrap_err();
+    assert_eq!(
+        (err.code.as_str(), err.retryable),
+        ("network_error", true),
+        "{err:?}"
+    );
+    assert!(!clock.sleeps().is_empty(), "были повторы");
+    let (mut api, _, _) = client_at(base_url, 1, Duration::from_secs(5));
+    let err = api
+        .get_continuation("/scroll/reviews", &[("cursor", "c1")])
+        .unwrap_err();
+    assert_eq!(err.code, "network_error", "{err:?}");
 }

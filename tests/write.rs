@@ -405,7 +405,7 @@ fn comment_posts_to_the_encoded_review_path() {
         &[
             "reviews",
             "comment",
-            "crm/42 а",
+            "crm 42 а",
             "--text",
             "Спасибо за отзыв!",
             "--state",
@@ -420,7 +420,7 @@ fn comment_posts_to_the_encoded_review_path() {
         (req.method.as_str(), req.path.as_str()),
         (
             "POST",
-            "/v4/reviews/crm%2F42%20%D0%B0/relationships/comments"
+            "/v4/reviews/crm%2042%20%D0%B0/relationships/comments"
         )
     );
     assert_eq!(
@@ -430,7 +430,7 @@ fn comment_posts_to_the_encoded_review_path() {
     assert_eq!(v["command"], "reviews.comment");
     assert_eq!(
         v["result"]["request"]["path"],
-        "/reviews/crm%2F42%20%D0%B0/relationships/comments"
+        "/reviews/crm%2042%20%D0%B0/relationships/comments"
     );
     assert_eq!(v["result"]["created"]["id"], "c1");
 }
@@ -523,4 +523,73 @@ fn comment_unknown_outcome_points_to_the_review_comments() {
         "{hint}"
     );
     assert_eq!(server.requests().len(), 1);
+}
+
+/// Пропущенное значение текста: с `allow_hyphen_values` clap взял бы следующий флаг как текст,
+/// и `-n` превратился бы в настоящую запись.
+#[test]
+fn a_flag_in_place_of_the_text_is_refused() {
+    let server = MockServer::start(vec![]);
+    let cases: [(&[&str], &str); 4] = [
+        (
+            &["reviews", "comment", "r1", "--text", "-n", "--json"],
+            "text",
+        ),
+        (
+            &["reviews", "create", "--rating", "5", "--body", "-n"],
+            "body",
+        ),
+        (
+            &[
+                "reviews", "create", "--rating", "5", "--pros", "--json", "-n",
+            ],
+            "pros",
+        ),
+        (
+            &["reviews", "create", "--rating", "5", "--cons", "--dry-run"],
+            "cons",
+        ),
+    ];
+    for (args, field) in cases {
+        local_error(&server, &run(&server, args, ""), "usage", field);
+    }
+}
+
+/// Сервер отрезает от id всё после точки (как формат, даже `%2E`) и не маршрутизирует `%2F`:
+/// запись ушла бы в чужой отзыв или в никуда (§15 дизайна среза 1).
+#[test]
+fn review_ids_the_server_cannot_route_are_refused() {
+    let server = MockServer::start(vec![]);
+    for id in ["crm-1.5", "crm/1"] {
+        let out = run(&server, &["reviews", "comment", id, "--text", "x"], "");
+        local_error(&server, &out, "invalid_id", "review_id");
+    }
+}
+
+#[test]
+fn unaddressable_external_id_is_not_offered_as_the_check() {
+    let server = MockServer::start(vec![Reply::text(500, "oops")]);
+    let out = run(
+        &server,
+        &[
+            "reviews",
+            "create",
+            "--rating",
+            "5",
+            "--body",
+            "ok",
+            "--external-id",
+            "crm.1",
+        ],
+        "",
+    );
+    assert_eq!(out.code, 1, "{}", out.stderr);
+    let hint = out.error_json()["error"]["hint"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        !hint.contains("reviews get crm.1") && hint.contains("личном кабинете"),
+        "{hint}"
+    );
 }

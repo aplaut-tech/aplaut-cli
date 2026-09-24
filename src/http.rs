@@ -238,10 +238,12 @@ impl ApiClient {
                 }
                 Err(err) => {
                     let error = self.transport_error(&err);
-                    let never_sent = matches!(
-                        err,
-                        ureq::Error::ConnectionFailed | ureq::Error::HostNotFound
-                    );
+                    let never_sent = match &err {
+                        ureq::Error::ConnectionFailed | ureq::Error::HostNotFound => true,
+                        // ECONNREFUSED бывает только при соединении; ureq 3 отдаёт его как Io.
+                        ureq::Error::Io(e) => e.kind() == std::io::ErrorKind::ConnectionRefused,
+                        _ => false,
+                    };
                     if replay == Replay::OnlyIfUnprocessed && !never_sent {
                         return Err(self.outcome_unknown(&error.message));
                     }

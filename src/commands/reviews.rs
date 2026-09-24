@@ -4,11 +4,12 @@
 use std::io::{self, IsTerminal};
 use std::path::Path;
 
+use clap::CommandFactory;
 use serde_json::{Map, Value};
 
 use super::{check_id, connect, records, Ctx, Outcome, DRY_RUN_PREFIX};
 use crate::auth::StdinSource;
-use crate::cli::{CommentArgs, CreateReviewArgs, ReviewsVerb};
+use crate::cli::{Cli, CommentArgs, CreateReviewArgs, ReviewsVerb};
 use crate::error::CliError;
 use crate::http;
 use crate::ops::write::{self, Flag, WriteRequest, WriteResult};
@@ -30,6 +31,14 @@ pub fn run(verb: ReviewsVerb, ctx: &Ctx) -> Result<Outcome, CliError> {
 const REVIEW_TEXT: [&str; 3] = ["body", "pros", "cons"];
 
 fn create(args: &CreateReviewArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
+    check_texts(
+        &["reviews", "create"],
+        &[
+            ("body", args.body.as_deref()),
+            ("pros", args.pros.as_deref()),
+            ("cons", args.cons.as_deref()),
+        ],
+    )?;
     let (spec, path) = write_operation(Verb::Create)?;
     let flags = create_flags(args);
     let required: Vec<&str> = spec
@@ -41,16 +50,51 @@ fn create(args: &CreateReviewArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
     let attributes = prepare(spec, &required, args.data.as_deref(), &flags, ctx)?;
     require_review_text(&attributes)?;
     let verify = match attributes.get("external_id").and_then(Value::as_str) {
-        Some(id) => format!(
+        // Id, который get не примет (пустой, с «.» или «/»), проверкой предлагать нельзя.
+        Some(id) if check_id(id, "external_id").is_ok() => format!(
             "проверьте, создан ли отзыв: aplaut reviews get {}",
             shell_word(id)
         ),
-        None => "проверьте в личном кабинете, прежде чем повторять; с --external-id это делает aplaut reviews get <external_id>".to_string(),
+        _ => "проверьте в личном кабинете, прежде чем повторять; с --external-id это делает aplaut reviews get <external_id>".to_string(),
     };
     let request = write::request(spec, path, attributes);
     execute(request, args.dry.dry_run, &verify, ctx, |created| {
         format!("Отзыв создан: id {}", id_of(created))
     })
+}
+
+/// Свободный текст можно начинать с `-` (`allow_hyphen_values`), но значение, равное флагу
+/// команды, значит, что сам текст пропущен (`--text $EMPTY -n`): иначе `-n` ушёл бы в отзыв
+/// текстом, а пробный запуск стал бы настоящей записью.
+fn check_texts(path: &[&str], texts: &[Flag]) -> Result<(), CliError> {
+    let mut root = Cli::command();
+    root.build();
+    let leaf = path.iter().fold(&root, |command, name| {
+        command
+            .find_subcommand(name)
+            .expect("подкоманда есть в дереве")
+    });
+    let flags: Vec<String> = leaf
+        .get_arguments()
+        .flat_map(|arg| {
+            let long = arg.get_long().map(|l| format!("--{l}"));
+            let short = arg.get_short().map(|s| format!("-{s}"));
+            long.into_iter().chain(short)
+        })
+        .collect();
+    for (name, value) in texts {
+        if let Some(value) = value.filter(|v| flags.iter().any(|f| f == v)) {
+            return Err(CliError::usage(
+                "usage",
+                format!("--{name}: значение «{value}» — это флаг; похоже, текст пропущен"),
+            )
+            .with_field(*name)
+            .with_hint(
+                "передайте текст в кавычках; текст, совпадающий с флагом, — ключом в --data",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn require_review_text(attributes: &Map<String, Value>) -> Result<(), CliError> {
@@ -85,6 +129,7 @@ fn create_flags(args: &CreateReviewArgs) -> Vec<Flag<'_>> {
 
 fn comment(args: &CommentArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
     check_id(&args.review_id, "review_id")?;
+    check_texts(&["reviews", "comment"], &[("text", args.text.as_deref())])?;
     let (spec, template) = write_operation(Verb::Comment)?;
     let flags = comment_flags(args);
     let attributes = prepare(spec, spec.required, args.data.as_deref(), &flags, ctx)?;

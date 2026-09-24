@@ -175,11 +175,11 @@ fn json_summary_goes_to_stderr_with_the_internal_id() {
 #[test]
 fn external_id_is_sent_as_one_encoded_path_segment() {
     let server = MockServer::start(vec![Reply::json(200, record_json())]);
-    let out = get(&server, &["reviews", "get", "crm/42 а?x#y"]);
+    let out = get(&server, &["reviews", "get", "crm 42 а?x#y"]);
     assert_eq!(out.code, 0, "{}", out.stderr);
     assert_eq!(
         server.requests()[0].path,
-        "/v4/reviews/crm%2F42%20%D0%B0%3Fx%23y"
+        "/v4/reviews/crm%2042%20%D0%B0%3Fx%23y"
     );
 }
 
@@ -199,6 +199,20 @@ fn empty_id_is_rejected_before_any_request() {
             (Some("invalid_id"), Some("id")),
             "{id:?}"
         );
+    }
+    assert!(server.requests().is_empty());
+}
+
+/// Стейджинг, 2026-09-24: `GET /reviews/x.json` и `/reviews/x%2Ejson` ищут запись «x», а `%2F`
+/// не маршрутизируется — такой id вернул бы чужую запись или ложное «не найдено».
+#[test]
+fn ids_the_server_cannot_route_are_refused_before_any_request() {
+    let server = MockServer::start(vec![]);
+    for id in ["crm-1.5", "report.json", "a/b"] {
+        let out = get(&server, &["reviews", "get", id]);
+        assert_eq!(out.code, 2, "{id}: {}", out.stderr);
+        let err = out.error_json();
+        assert_eq!(err["error"]["code"], "invalid_id", "{id}");
     }
     assert!(server.requests().is_empty());
 }

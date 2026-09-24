@@ -46,6 +46,7 @@ fn root_help_explains_the_agent_contract() {
         "--yes",
         "--dry-run",
         "retry_after",
+        "у scroll и get",
     ] {
         assert!(help.contains(needle), "нет «{needle}»");
     }
