@@ -1,4 +1,5 @@
-//! Страница ответа scroll: тело как есть плюс разобранные `data`, `included`, `meta`.
+//! Страница ответа scroll (или одна запись `get`): тело как есть плюс разобранные `data`,
+//! `included`, `meta`.
 
 use std::collections::HashMap;
 
@@ -36,23 +37,45 @@ struct Wire {
     meta: PageMeta,
 }
 
+#[derive(Deserialize)]
+struct SingleWire {
+    data: Value,
+    #[serde(default)]
+    included: Vec<Value>,
+}
+
 impl Page {
     pub fn parse(body: Vec<u8>) -> Result<Page, CliError> {
-        let wire: Wire = serde_json::from_slice(&body).map_err(|e| {
-            CliError::general(
-                "bad_response",
-                format!("ответ сервера не похож на страницу обхода: {e}"),
-            )
-            .retryable(true)
-            .with_hint(
-                "между CLI и API может стоять прокси, или идут технические работы; повторите позже",
-            )
-        })?;
+        let wire: Wire = serde_json::from_slice(&body)
+            .map_err(|e| bad_response(format!("ответ сервера не похож на страницу обхода: {e}")))?;
         Ok(Page {
             body,
             data: wire.data,
             included: wire.included,
             meta: wire.meta,
+        })
+    }
+
+    /// Ответ `GET /{type}/{id}` — страница из одной записи: её выводят те же форматы, что scroll.
+    pub fn single(body: Vec<u8>) -> Result<Page, CliError> {
+        let wire: SingleWire = serde_json::from_slice(&body)
+            .map_err(|e| bad_response(format!("ответ сервера не похож на запись: {e}")))?;
+        if !wire.data.is_object() {
+            return Err(bad_response(
+                "ответ сервера не похож на запись: data — не объект".into(),
+            ));
+        }
+        Ok(Page {
+            body,
+            data: vec![wire.data],
+            included: wire.included,
+            meta: PageMeta {
+                has_more: false,
+                count: Some(1),
+                cursor: None,
+                total_count: None,
+                applied_filter: None,
+            },
         })
     }
 
@@ -63,6 +86,14 @@ impl Page {
             .map(str::to_string)
             .collect()
     }
+}
+
+fn bad_response(message: String) -> CliError {
+    CliError::general("bad_response", message)
+        .retryable(true)
+        .with_hint(
+            "между CLI и API может стоять прокси, или идут технические работы; повторите позже",
+        )
 }
 
 pub fn record_id(record: &Value) -> Option<&str> {
@@ -114,6 +145,18 @@ mod tests {
         let index = IncludedIndex::new(&page.included);
         assert!(index.get("consumers", "0000000000000000aa000002").is_some());
         assert!(index.get("products", "0000000000000000aa000002").is_none());
+    }
+
+    #[test]
+    fn single_record_is_a_one_record_page() {
+        let body = br#"{"data":{"id":"r1","type":"reviews","relationships":{"author":{"data":{"id":"c1","type":"consumers"}}}},"included":[{"id":"c1","type":"consumers","attributes":{"name":"Anna"}}]}"#;
+        let page = Page::single(body.to_vec()).unwrap();
+        assert_eq!(page.ids(), vec!["r1"]);
+        assert_eq!(page.included.len(), 1);
+        assert!(!page.meta.has_more);
+        for bad in [&br#"{"data":[]}"#[..], b"<html>", br#"{"data":null}"#] {
+            assert_eq!(Page::single(bad.to_vec()).unwrap_err().code, "bad_response");
+        }
     }
 
     #[test]

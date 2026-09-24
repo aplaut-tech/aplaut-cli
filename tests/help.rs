@@ -29,7 +29,8 @@ fn every_leaf_command_documents_examples_json_and_exit_codes() {
     leaves(&mut root, "aplaut", &mut found);
     assert!(found.len() >= 10, "{found:?}");
     for (path, help) in &found {
-        for section in ["Примеры:", "JSON (--json):", "Коды выхода:"] {
+        for section in ["Примеры:", "JSON (--json):", "Ошибки:", "Коды выхода:"]
+        {
             assert!(help.contains(section), "{path}: нет «{section}»");
         }
     }
@@ -47,5 +48,26 @@ fn root_help_explains_the_agent_contract() {
         "retry_after",
     ] {
         assert!(help.contains(needle), "нет «{needle}»");
+    }
+}
+
+#[test]
+fn get_help_lists_includes_from_the_spec() {
+    let mut root = Cli::command();
+    root.build();
+    for resource in aplaut_cli::resources::ALL {
+        let help = root
+            .find_subcommand_mut(resource.name)
+            .and_then(|c| c.find_subcommand_mut("get"))
+            .unwrap_or_else(|| panic!("{} get", resource.name))
+            .render_long_help()
+            .to_string();
+        for include in aplaut_cli::spec::get_includes(resource.records_type).unwrap() {
+            assert!(
+                help.contains(include),
+                "{} get: нет «{include}»",
+                resource.name
+            );
+        }
     }
 }

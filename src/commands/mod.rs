@@ -7,13 +7,17 @@ pub mod records;
 use std::io::{self, IsTerminal};
 use std::path::Path;
 use std::rc::Rc;
+use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::auth::EnvSnapshot;
+use crate::api_error::ErrorContext;
+use crate::auth::{EnvSnapshot, StdinSource, TokenFlags, DEFAULT_BASE_URL};
 use crate::cli::{AuthVerb, Command, GlobalArgs, ProfileVerb, RecordsVerb};
 use crate::clock::Clock;
+use crate::config::{self, Paths};
 use crate::error::CliError;
+use crate::http::{ApiClient, HttpSettings};
 use crate::resources;
 use crate::term::Reporter;
 
@@ -147,7 +151,83 @@ pub fn command_name(command: &Command) -> String {
 fn records_verb(verb: &RecordsVerb) -> &'static str {
     match verb {
         RecordsVerb::Scroll(_) => "scroll",
+        RecordsVerb::Get(_) => "get",
     }
+}
+
+pub fn connect(ctx: &Ctx) -> Result<ApiClient, CliError> {
+    // Каталог конфигурации и credentials нужны только для профиля: запуск с токеном из флага
+    // или env не должен зависеть ни от HOME, ни от исправности чужих файлов.
+    let mut load_credentials =
+        || config::load_credentials(&Paths::resolve(&ctx.env)?, &ctx.reporter);
+    let flags = TokenFlags {
+        token_stdin: ctx.global.token_stdin,
+        token_file: ctx.global.token_file.as_deref(),
+        profile: ctx.global.profile.as_deref(),
+    };
+    let stdin = io::stdin();
+    let is_terminal = stdin.is_terminal();
+    let mut lock = stdin.lock();
+    let mut source = StdinSource {
+        is_terminal,
+        reader: &mut lock,
+    };
+    let (token, token_source) =
+        crate::auth::resolve_token(&flags, &ctx.env, &mut load_credentials, &mut source)?;
+    let profile = crate::auth::active_profile(ctx.global.profile.as_deref(), &ctx.env)?;
+    let profile_flag = ctx.global.profile.is_some();
+    if profile_flag && ctx.global.base_url.is_none() && ctx.env.base_url.is_some() {
+        ctx.reporter.warn(
+            "base_url_env_ignored",
+            &format!(
+                "APLAUT_BASE_URL не используется: при явном --profile {profile} берётся base URL профиля"
+            ),
+        );
+    }
+    let mut load_profile = || -> Result<_, CliError> {
+        let config = config::load_config(&Paths::resolve(&ctx.env)?)?;
+        Ok(config.profiles.get(&profile).cloned())
+    };
+    let base_url = crate::auth::resolve_base_url(
+        ctx.global.base_url.as_deref(),
+        &ctx.env,
+        profile_flag,
+        &mut load_profile,
+    )?;
+    if base_url != DEFAULT_BASE_URL {
+        ctx.reporter.debug(&format!("base URL: {base_url}"));
+    }
+    ctx.reporter
+        .debug(&format!("токен из {}", token_source.describe()));
+    let settings = HttpSettings {
+        base_url: base_url.clone(),
+        timeout: Duration::from_secs(ctx.global.timeout),
+        max_retries: ctx.global.max_retries,
+    };
+    let error_context = ErrorContext {
+        token_source: token_source.describe(),
+        base_url,
+    };
+    Ok(ApiClient::new(
+        settings,
+        token,
+        error_context,
+        ctx.clock.clone(),
+        ctx.reporter.clone(),
+    ))
+}
+
+/// Пустой id (например, из незаданной переменной шелла) превратил бы `GET /reviews/{id}` в
+/// запрос списка, а `.` и `..` — в другой путь.
+pub fn check_id(id: &str, field: &str) -> Result<(), CliError> {
+    if id.trim().is_empty() || id == "." || id == ".." {
+        return Err(
+            CliError::usage("invalid_id", format!("недопустимый идентификатор «{id}»"))
+                .with_field(field)
+                .with_hint("передайте внутренний id или external_id записи"),
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]

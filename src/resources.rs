@@ -5,18 +5,22 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verb {
     Scroll,
+    Get,
 }
 
 impl Verb {
     pub fn name(self) -> &'static str {
         match self {
             Verb::Scroll => "scroll",
+            Verb::Get => "get",
         }
     }
 
-    pub fn operation(self) -> (&'static str, &'static str) {
+    /// Метод и шаблон пути операции в `spec/api.yaml`.
+    pub fn operation(self, resource: &Resource) -> (&'static str, String) {
         match self {
-            Verb::Scroll => ("GET", "/scroll/{records_type}"),
+            Verb::Scroll => ("GET", "/scroll/{records_type}".to_string()),
+            Verb::Get => ("GET", format!("/{}/{{id}}", resource.records_type)),
         }
     }
 }
@@ -31,17 +35,17 @@ pub struct Resource {
 pub static REVIEWS: Resource = Resource {
     name: "reviews",
     records_type: "reviews",
-    verbs: &[Verb::Scroll],
+    verbs: &[Verb::Scroll, Verb::Get],
 };
 pub static PRODUCTS: Resource = Resource {
     name: "products",
     records_type: "products",
-    verbs: &[Verb::Scroll],
+    verbs: &[Verb::Scroll, Verb::Get],
 };
 pub static QUESTIONS: Resource = Resource {
     name: "questions",
     records_type: "questions",
-    verbs: &[Verb::Scroll],
+    verbs: &[Verb::Scroll, Verb::Get],
 };
 
 pub static ALL: &[&Resource] = &[&REVIEWS, &PRODUCTS, &QUESTIONS];

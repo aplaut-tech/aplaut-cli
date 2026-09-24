@@ -18,6 +18,7 @@ pub const VERSION: &str = concat!(
 const ROOT_AFTER_HELP: &str = "\
 Примеры:
   aplaut auth login
+  aplaut reviews get crm-4211 --include comments --format jsonl
   aplaut reviews scroll --filter updated_at:gte:2024-01-01T00:00:00Z --format jsonl > reviews.jsonl
   aplaut products scroll --format csv --max-records 500 | tw
 
@@ -75,6 +76,7 @@ rate_limited (retry_after — сколько секунд ждать), server_er
 const ROOT_AFTER_LONG_HELP: &str = "\
 Примеры:
   aplaut auth login
+  aplaut reviews get crm-4211 --include comments --format jsonl
   aplaut reviews scroll --filter updated_at:gte:2024-01-01T00:00:00Z --format jsonl > reviews.jsonl
   aplaut products scroll --format csv --max-records 500 | tw
 
@@ -99,6 +101,35 @@ const ROOT_AFTER_LONG_HELP: &str = "\
 
 Документация: https://aplaut.com/docs/api-references/platform/
 Поддержка: support@aplaut.com";
+
+const GET_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut reviews get 5f1c2a9e8b7d6c5b4a3f2e1d                              # по внутреннему id
+  aplaut reviews get crm-4211 --include author,comments --format jsonl    # по внешнему id
+  aplaut products get 444772 --format csv --fields id,name
+
+  # Для агента: запись — в stdout, итог — одной строкой JSON в stderr.
+  aplaut reviews get crm-4211 --include comments --format jsonl --json
+
+ID — внутренний идентификатор или external_id. --include по ресурсу (проверяется до запроса):
+  reviews    author, product, comments, state_changes
+  products   reviews_summary_item, reviews, questions, brand, category
+  questions  author, product, answers
+
+Форматы — как у scroll, для одной записи: raw — тело ответа одной строкой; jsonl — запись
+с подставленными объектами --include; csv — заголовок и строка (--fields — по правилам scroll).
+
+JSON (--json): запись — в stdout в --format; итог — в stderr одной строкой:
+  {\"ok\":true,\"command\":\"reviews.get\",\"cli_version\":…,\"dry_run\":false,
+   \"result\":{\"records_type\":\"reviews\",\"id\":\"<внутренний id>\"},\"warnings\":[]}
+
+Ошибки: invalid_id, invalid_include, invalid_fields, duplicate_field, field_needs_include,
+fields_need_tabular_format, unknown_field, field_to_many, not_found, bad_response, no_token,
+invalid_token, unauthorized, forbidden, rate_limited (retry_after — сколько секунд ждать),
+server_error, network_error, timeout.
+
+Коды выхода: 0 — успех; 2 — ошибка в параметрах; 3 — нет токена или он отклонён; 5 — записи нет;
+7 — rate limit, повторы исчерпаны; 1 — прочие ошибки.";
 
 /// Короткая справка (`-h`) листовых команд отсылает к длинной.
 const LEAF_AFTER_HELP: &str = "Примеры, поля JSON (--json) и коды выхода: --help";
@@ -314,6 +345,24 @@ pub enum RecordsVerb {
     /// Выгрузить записи обходом по курсору (GET /scroll/{records_type})
     #[command(after_help = SCROLL_AFTER_HELP, after_long_help = SCROLL_AFTER_LONG_HELP)]
     Scroll(ScrollArgs),
+    /// Одна запись по внутреннему или внешнему id (GET /{records_type}/{id})
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = GET_AFTER_LONG_HELP)]
+    Get(GetArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct GetArgs {
+    /// Внутренний или внешний (external_id) идентификатор
+    pub id: String,
+    /// Связанные объекты через запятую (допустимые по ресурсу — в --help)
+    #[arg(long, value_name = "REL,…")]
+    pub include: Option<String>,
+    /// Формат вывода
+    #[arg(long, value_name = "FORMAT", default_value = "raw", value_parser = format_parser())]
+    pub format: Format,
+    /// Колонки CSV (только --format csv) через запятую, в заданном порядке — как у scroll
+    #[arg(long, value_name = "COL,…")]
+    pub fields: Option<String>,
 }
 
 #[derive(Debug, Clone, Args)]

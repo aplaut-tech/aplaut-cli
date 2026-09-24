@@ -43,17 +43,22 @@ fn every_command_maps_to_a_spec_operation() {
             .iter()
             .find(|v| v.name() == path[1])
             .unwrap_or_else(|| panic!("«{joined}»: глагол не описан у ресурса в resources.rs"));
-        let (method, operation) = verb.operation();
+        let (method, operation) = verb.operation(resource);
         assert!(
-            spec::has_operation(method, operation),
+            spec::has_operation(method, &operation),
             "«{joined}» → {method} {operation}: нет в spec/api.yaml"
         );
-        if *verb == Verb::Scroll {
-            assert!(
+        match verb {
+            Verb::Scroll => assert!(
                 spec::scroll_spec(resource.records_type).is_some(),
                 "«{joined}»: {} не поддерживается scroll",
                 resource.records_type
-            );
+            ),
+            Verb::Get => assert!(
+                spec::get_includes(resource.records_type).is_some(),
+                "«{joined}»: нет GET /{}/{{id}}",
+                resource.records_type
+            ),
         }
     }
 }

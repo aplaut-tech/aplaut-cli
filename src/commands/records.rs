@@ -1,22 +1,20 @@
-//! Глаголы ресурсов с записями (reviews, products, questions). Собственный модуль у ресурса
-//! появится, когда у него будут свои глаголы.
+//! Глаголы чтения ресурсов с записями (reviews, products, questions): scroll и get. Запись
+//! у отзывов — в `reviews`.
 
-use std::io::{self, BufWriter, IsTerminal, Write};
+use std::collections::HashSet;
+use std::io::{self, BufWriter, Write};
 use std::path::Path;
-use std::time::Duration;
 
 use serde::Serialize;
 
-use super::{path_text, Ctx, Outcome};
-use crate::api_error::ErrorContext;
-use crate::auth::{self, StdinSource, TokenFlags, DEFAULT_BASE_URL};
-use crate::cli::{RecordsVerb, ScrollArgs};
-use crate::config::{self, Paths};
+use super::{check_id, connect, path_text, Ctx, Outcome};
+use crate::cli::{GetArgs, RecordsVerb, ScrollArgs};
 use crate::error::CliError;
 use crate::filter;
-use crate::http::{ApiClient, HttpSettings};
+use crate::http::{self, Pace};
 use crate::ops::scroll::{self, ScrollJob, ScrollOutcome};
-use crate::output::{self, tabular};
+use crate::output::{self, tabular, Format};
+use crate::page::Page;
 use crate::resources::Resource;
 use crate::spec::{self, ScrollSpec};
 use crate::state::ScrollParams;
@@ -24,7 +22,52 @@ use crate::state::ScrollParams;
 pub fn run(resource: &'static Resource, verb: RecordsVerb, ctx: &Ctx) -> Result<Outcome, CliError> {
     match verb {
         RecordsVerb::Scroll(args) => scroll_records(resource, &args, ctx),
+        RecordsVerb::Get(args) => get_record(resource, &args, ctx),
     }
+}
+
+/// Итог `get` в `result`: внутренний id — даже если запрошен внешний.
+#[derive(Serialize)]
+struct GetResult<'a> {
+    records_type: &'a str,
+    id: Option<String>,
+}
+
+fn get_record(resource: &Resource, args: &GetArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
+    let allowed = spec::get_includes(resource.records_type).ok_or_else(|| {
+        CliError::general(
+            "internal",
+            format!("в спеке нет GET /{}/{{id}}", resource.records_type),
+        )
+    })?;
+    check_id(&args.id, "id")?;
+    let include = match &args.include {
+        Some(list) => filter::parse_include(list, allowed)?,
+        None => Vec::new(),
+    };
+    let fields = output_fields(args.format, args.fields.as_deref(), &include)?;
+    let mut api = connect(ctx)?;
+    let path = format!(
+        "/{}/{}",
+        resource.records_type,
+        http::path_segment(&args.id)
+    );
+    let include_list = include.join(",");
+    let query: Vec<(&str, &str)> = if include.is_empty() {
+        Vec::new()
+    } else {
+        vec![("include", include_list.as_str())]
+    };
+    let response = api.get(&path, &query, Pace::Default)?;
+    let page = Page::single(response.body)?;
+    let out: Box<dyn Write> = Box::new(BufWriter::new(io::stdout().lock()));
+    let mut sink = output::make_sink(args.format, out, &include, fields, ctx.reporter.clone());
+    sink.write_page(&page, &HashSet::new())?;
+    sink.finish()?;
+    Ok(Outcome::stderr(GetResult {
+        records_type: resource.records_type,
+        id: page.ids().into_iter().next(),
+    }))
 }
 
 /// Итог обхода в `result` (спека agent mode §2).
@@ -122,7 +165,7 @@ pub fn scroll_params(args: &ScrollArgs, spec: &ScrollSpec) -> Result<ScrollParam
                 .with_field("max_records"),
         );
     }
-    let fields = output_fields(args, &include)?;
+    let fields = output_fields(args.format, args.fields.as_deref(), &include)?;
     Ok(ScrollParams {
         filter: args.filter.clone(),
         sort,
@@ -133,11 +176,15 @@ pub fn scroll_params(args: &ScrollArgs, spec: &ScrollSpec) -> Result<ScrollParam
 }
 
 /// `--fields` — только для табличных форматов: `raw` отдаёт тело ответа как есть, `jsonl` — документ.
-fn output_fields(args: &ScrollArgs, include: &[String]) -> Result<Option<Vec<String>>, CliError> {
-    let Some(list) = &args.fields else {
+fn output_fields(
+    format: Format,
+    fields: Option<&str>,
+    include: &[String],
+) -> Result<Option<Vec<String>>, CliError> {
+    let Some(list) = fields else {
         return Ok(None);
     };
-    if !args.format.is_tabular() {
+    if !format.is_tabular() {
         return Err(CliError::usage(
             "fields_need_tabular_format",
             "--fields выбирает колонки табличного вывода и работает только с --format csv",
@@ -146,68 +193,6 @@ fn output_fields(args: &ScrollArgs, include: &[String]) -> Result<Option<Vec<Str
         .with_hint("добавьте --format csv или уберите --fields"));
     }
     tabular::parse_fields(list, include).map(Some)
-}
-
-fn connect(ctx: &Ctx) -> Result<ApiClient, CliError> {
-    // Каталог конфигурации и credentials нужны только для профиля: запуск с токеном из флага
-    // или env не должен зависеть ни от HOME, ни от исправности чужих файлов.
-    let mut load_credentials =
-        || config::load_credentials(&Paths::resolve(&ctx.env)?, &ctx.reporter);
-    let flags = TokenFlags {
-        token_stdin: ctx.global.token_stdin,
-        token_file: ctx.global.token_file.as_deref(),
-        profile: ctx.global.profile.as_deref(),
-    };
-    let stdin = io::stdin();
-    let is_terminal = stdin.is_terminal();
-    let mut lock = stdin.lock();
-    let mut source = StdinSource {
-        is_terminal,
-        reader: &mut lock,
-    };
-    let (token, token_source) =
-        auth::resolve_token(&flags, &ctx.env, &mut load_credentials, &mut source)?;
-    let profile = auth::active_profile(ctx.global.profile.as_deref(), &ctx.env)?;
-    let profile_flag = ctx.global.profile.is_some();
-    if profile_flag && ctx.global.base_url.is_none() && ctx.env.base_url.is_some() {
-        ctx.reporter.warn(
-            "base_url_env_ignored",
-            &format!(
-                "APLAUT_BASE_URL не используется: при явном --profile {profile} берётся base URL профиля"
-            ),
-        );
-    }
-    let mut load_profile = || -> Result<_, CliError> {
-        let config = config::load_config(&Paths::resolve(&ctx.env)?)?;
-        Ok(config.profiles.get(&profile).cloned())
-    };
-    let base_url = auth::resolve_base_url(
-        ctx.global.base_url.as_deref(),
-        &ctx.env,
-        profile_flag,
-        &mut load_profile,
-    )?;
-    if base_url != DEFAULT_BASE_URL {
-        ctx.reporter.debug(&format!("base URL: {base_url}"));
-    }
-    ctx.reporter
-        .debug(&format!("токен из {}", token_source.describe()));
-    let settings = HttpSettings {
-        base_url: base_url.clone(),
-        timeout: Duration::from_secs(ctx.global.timeout),
-        max_retries: ctx.global.max_retries,
-    };
-    let error_context = ErrorContext {
-        token_source: token_source.describe(),
-        base_url,
-    };
-    Ok(ApiClient::new(
-        settings,
-        token,
-        error_context,
-        ctx.clock.clone(),
-        ctx.reporter.clone(),
-    ))
 }
 
 /// clig: после работы — коротко, что произошло и что делать дальше.

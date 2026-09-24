@@ -122,6 +122,18 @@ aplaut reviews scroll --filter updated_at:gte:2024-01-01T00:00:00Z --include pro
   затем `scroll_position_uncertain`), а печатает команду для нового обхода с границы последней
   выданной записи: `--filter updated_at:gte:<значение> --state <новый файл>`.
 
+## Одна запись
+
+```bash
+aplaut reviews get 5f1c2a9e8b7d6c5b4a3f2e1d                              # по внутреннему id
+aplaut reviews get crm-4211 --include author,comments --format jsonl    # по внешнему id
+aplaut products get 444772 --format csv --fields id,name
+```
+
+`get` есть у `reviews`, `products` и `questions`; `ID` — внутренний идентификатор или
+`external_id`. Форматы и `--fields` — как у выгрузки. `--include` проверяется по спеке до
+запроса (допустимые — в `aplaut <ресурс> get --help`). Записи нет — код 5.
+
 ## Форматы
 
 | `--format` | Что в stdout |
@@ -193,6 +205,7 @@ aplaut reviews scroll --filter updated_at:gte:2024-01-01T00:00:00Z --include pro
 | `usage` | 2 | неверные аргументы: неизвестный флаг, нет обязательного |
 | `invalid_filter` | 2 | `--filter` не по спеке |
 | `invalid_include` | 2 | неизвестная связь в `--include` |
+| `invalid_id` | 2 | пустой идентификатор, `.` или `..` |
 | `invalid_sort` | 2 | сортировка не из допустимых |
 | `invalid_per_page` | 2 | `--per-page` вне 1–100 |
 | `invalid_max_records` | 2 | `--max-records 0` |
