@@ -22,6 +22,7 @@ pub mod resources;
 pub mod secret;
 pub mod spec;
 pub mod state;
+pub mod suggest;
 pub mod term;
 pub mod time;
 

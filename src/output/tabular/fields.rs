@@ -7,9 +7,7 @@ use std::collections::BTreeSet;
 use super::projection::{ColumnKey, Row};
 use super::schema::{infer_type, Column, Schema};
 use crate::error::CliError;
-
-/// Дальше опечатку уже не угадать: подсказка сбивала бы с толку.
-const MAX_SUGGESTION_DISTANCE: usize = 2;
+use crate::suggest;
 
 /// Локальная проверка списка — до запроса, чтобы ошибка не тратила квоту открытий scroll.
 pub fn parse_fields(list: &str, include: &[String]) -> Result<Vec<String>, CliError> {
@@ -167,12 +165,8 @@ fn resolve(name: &str, observed: &Observed) -> Result<ColumnKey, CliError> {
 /// Как `gh --json`: при опечатке — ближайшее имя и все колонки в порядке заголовка CSV.
 fn unknown(name: &str, seen: &BTreeSet<&ColumnKey>) -> CliError {
     let names: Vec<String> = seen.iter().map(|k| k.name()).collect();
-    let suggestion = names
-        .iter()
-        .map(|n| (distance(name, n), n))
-        .filter(|(d, _)| *d <= MAX_SUGGESTION_DISTANCE)
-        .min_by_key(|(d, _)| *d)
-        .map(|(_, n)| format!("может, {n}? "))
+    let suggestion = suggest::closest(name, names.iter().map(String::as_str))
+        .map(|n| format!("может, {n}? "))
         .unwrap_or_default();
     CliError::usage("unknown_field", format!("в данных нет колонки «{name}»"))
         .with_field("fields")
@@ -180,21 +174,6 @@ fn unknown(name: &str, seen: &BTreeSet<&ColumnKey>) -> CliError {
             "{suggestion}колонки на первой странице: {}",
             names.join(", ")
         ))
-}
-
-/// Расстояние Левенштейна по символам.
-fn distance(a: &str, b: &str) -> usize {
-    let b: Vec<char> = b.chars().collect();
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
-    for (i, ca) in a.chars().enumerate() {
-        let mut cur = vec![i + 1];
-        for (j, cb) in b.iter().enumerate() {
-            let replace = prev[j] + usize::from(ca != *cb);
-            cur.push(replace.min(prev[j + 1] + 1).min(cur[j] + 1));
-        }
-        prev = cur;
-    }
-    prev[b.len()]
 }
 
 #[cfg(test)]

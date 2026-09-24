@@ -215,6 +215,11 @@ aplaut products get 444772 --format csv --fields id,name
 | `fields_need_tabular_format` | 2 | `--fields` без `--format csv` |
 | `unknown_field` | 2 | колонки из `--fields` нет на первой странице обхода (в `hint` — ближайшее имя и все колонки) |
 | `field_to_many` | 2 | `<связь>.<атрибут>` у связи-списка |
+| `unknown_attribute` | 2 | атрибута нет в схеме тела запроса; в `hint` — ближайшее имя и допустимые |
+| `invalid_attribute` | 2 | значение атрибута не того типа, не из перечисления, вне границ или не RFC 3339 |
+| `missing_attribute` | 2 | не задан обязательный атрибут |
+| `invalid_data` | 2 | `--data` не читается, не JSON-объект или обёрнут в `data` |
+| `stdin_conflict` | 2 | `--data -` вместе с токеном из stdin |
 | `invalid_profile` | 2 | недопустимое имя профиля |
 | `invalid_base_url` | 2 | base URL не разбирается |
 | `insecure_base_url` | 2 | `http://` не для localhost |
@@ -222,7 +227,7 @@ aplaut products get 444772 --format csv --fields id,name
 | `nothing_to_set` | 2 | `profile set` без `--base-url` и `--description` |
 | `empty_token` | 2 | токен пустой |
 | `invalid_token_format` | 2 | в токене пробелы или управляющие символы |
-| `stdin_is_terminal` | 2 | `--token-stdin`, а stdin — терминал |
+| `stdin_is_terminal` | 2 | `--token-stdin` или `--data -`, а stdin — терминал |
 | `token_required` | 2 | `auth login` без `--token-stdin`/`--token-file` там, где спросить нельзя |
 | `terminal_required` | 2 | `profile edit` без терминала, с `--no-input` или `--json` |
 | `state_invalid` | 2 | файл стейта повреждён |
