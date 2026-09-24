@@ -5,9 +5,9 @@ use serde_json::Value;
 
 use super::writes::{check_texts, execute, id_of, prepare, write_operation, Submission};
 use super::{check_id, records, Ctx, Outcome};
-use crate::cli::{CreateProductArgs, ProductFields, ProductsVerb};
+use crate::cli::{CreateProductArgs, ProductFields, ProductsVerb, UpdateProductArgs};
 use crate::error::CliError;
-use crate::http::Replay;
+use crate::http::{self, Replay};
 use crate::ops::write::{self, Flag};
 use crate::resources::{self, Verb};
 use crate::term::shell_word;
@@ -19,6 +19,7 @@ pub fn run(verb: ProductsVerb, ctx: &Ctx) -> Result<Outcome, CliError> {
     match verb {
         ProductsVerb::Records(verb) => records::run(&resources::PRODUCTS, verb, ctx),
         ProductsVerb::Create(args) => create(&args, ctx),
+        ProductsVerb::Update(args) => update(&args, ctx),
     }
 }
 
@@ -58,6 +59,51 @@ fn create(args: &CreateProductArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
     .map_err(|err| already_taken(err, &external_id))
 }
 
+fn update(args: &UpdateProductArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
+    check_id(&args.id, "id")?;
+    check_texts(&["products", "update"], &description(&args.fields))?;
+    let (spec, template) = write_operation(&resources::PRODUCTS, Verb::Update)?;
+    let flags = product_flags(&args.fields, args.external_id.as_deref());
+    let attributes = prepare(spec, spec.required, args.data.as_deref(), &flags, ctx)?;
+    if attributes.is_empty() {
+        // Пустой PUT ничего не меняет, но сервер сбрасывает категорию (стейджинг, 2026-09-24; P5).
+        return Err(CliError::usage(
+            "nothing_to_update",
+            "нечего менять: не передан ни один атрибут",
+        )
+        .with_hint("передайте флаг атрибута (--price, --available, …) или ключи в --data"));
+    }
+    // Смена external_id: повтор по старому id после потерянного ответа дал бы ложный 404 (P7).
+    let renamed = attributes
+        .get("external_id")
+        .and_then(Value::as_str)
+        .filter(|new| *new != args.id);
+    let (replay, verify) = match renamed {
+        Some(new) if check_id(new, "external_id").is_ok() => (
+            Replay::OnlyIfUnprocessed,
+            format!(
+                "проверьте, переименован ли товар: aplaut products get {}",
+                shell_word(new)
+            ),
+        ),
+        Some(_) => (
+            Replay::OnlyIfUnprocessed,
+            "проверьте товар в личном кабинете, прежде чем повторять".to_string(),
+        ),
+        None => (Replay::Safe, String::new()),
+    };
+    let path = template.replace("{id}", &http::path_segment(&args.id));
+    let submission = Submission {
+        request: write::request(spec, path, attributes),
+        replay,
+        verify,
+        outcome: "updated",
+    };
+    execute(submission, args.dry.dry_run, ctx, |updated| {
+        format!("Товар обновлён: id {}", id_of(updated))
+    })
+}
+
 /// 422 `external_id is already taken`: товар уже есть — его меняет `update`.
 fn already_taken(err: CliError, external_id: &str) -> CliError {
     if err.code != "validation_failed" || err.field.as_deref() != Some("external_id") {
@@ -89,4 +135,33 @@ fn product_flags<'a>(fields: &'a ProductFields, external_id: Option<&'a str>) ->
 /// Свободный текст товара — только описание (`allow_hyphen_values`).
 fn description(fields: &ProductFields) -> [Flag<'_>; 1] {
     [("description", fields.description.as_deref())]
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+    use crate::cli::{Cli, Command};
+
+    fn products_verb(args: &[&str]) -> ProductsVerb {
+        match Cli::try_parse_from(args).unwrap().command {
+            Command::Products { verb } => verb,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn every_flag_is_an_attribute_of_the_spec_schemas() {
+        let ProductsVerb::Create(args) = products_verb(&["aplaut", "products", "create"]) else {
+            panic!("create");
+        };
+        let flags = product_flags(&args.fields, None);
+        for verb in [Verb::Create, Verb::Update] {
+            let (spec, _) = write_operation(&resources::PRODUCTS, verb).unwrap();
+            for (name, _) in &flags {
+                assert!(spec.attribute(name).is_some(), "{verb:?} --{name}");
+            }
+        }
+    }
 }

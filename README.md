@@ -162,10 +162,13 @@ aplaut reviews comment crm-4211 --text "Спасибо за отзыв!"
 
 ```bash
 aplaut products create --external-id 60757 --name "Transcend StoreJet 1 ТБ" --url https://shop.example/p/60757 --price 5990 --category-id 297
+aplaut products update 60757 --price 5490 --available true
 ```
 
 - У `create` обязательны `external_id`, `name` и `url`. Второй товар с тем же `external_id` сервер не
   создаст (422 `is already taken`), поэтому повтор после сбоя безопасен.
+- `update` меняет только переданные атрибуты; `custom_attributes` сливаются, `null` очищает. Правка
+  повторяется после сбоя, как чтение; со сменой `external_id` — только если сервер точно её не получил.
 - `-n` показывает метод, путь и тело запроса и ничего не отправляет.
 
 ## Форматы
@@ -214,7 +217,7 @@ aplaut products create --external-id 60757 --name "Transcend StoreJet 1 ТБ" --
 | `--json` | итог и ошибка — одной строкой JSON; предупреждения — в `warnings`, а не текстом; включает `--no-input` |
 | `--no-input` | ничего не спрашивать: вместо вопроса — ошибка с подсказкой, какой флаг передать |
 | `--yes` (`-y`) | подтвердить удаление без вопроса (`profile delete`) |
-| `--dry-run` (`-n`) | у `profile set/delete`, `auth login/logout`, `reviews create/comment`: всё проверить и вернуть план в `result`, ничего не меняя |
+| `--dry-run` (`-n`) | у `profile set/delete`, `auth login/logout`, `reviews create/comment`, `products create/update`: всё проверить и вернуть план в `result`, ничего не меняя |
 
 ```json
 {"ok":true,"command":"profile.set","cli_version":"0.1.0","dry_run":false,
@@ -254,6 +257,7 @@ aplaut products create --external-id 60757 --name "Transcend StoreJet 1 ТБ" --
 | `missing_attribute` | 2 | не задан обязательный атрибут |
 | `invalid_data` | 2 | `--data` не читается, не JSON-объект или обёрнут в `data` |
 | `stdin_conflict` | 2 | `--data -` вместе с токеном из stdin |
+| `nothing_to_update` | 2 | `products update` без единого атрибута |
 | `invalid_profile` | 2 | недопустимое имя профиля |
 | `invalid_base_url` | 2 | base URL не разбирается |
 | `insecure_base_url` | 2 | `http://` не для localhost |

@@ -18,7 +18,7 @@ use crate::api_error::ErrorContext;
 use crate::auth::{EnvSnapshot, StdinSource, TokenFlags, DEFAULT_BASE_URL};
 use crate::cli::{
     AuthVerb, Command, CommentArgs, CreateProductArgs, CreateReviewArgs, GlobalArgs, ProductsVerb,
-    ProfileVerb, RecordsVerb, ReviewsVerb,
+    ProfileVerb, RecordsVerb, ReviewsVerb, UpdateProductArgs,
 };
 use crate::clock::Clock;
 use crate::config::{self, Paths};
@@ -131,6 +131,9 @@ pub fn is_dry_run(command: &Command) -> bool {
         }
         | Command::Products {
             verb: ProductsVerb::Create(CreateProductArgs { dry, .. }),
+        }
+        | Command::Products {
+            verb: ProductsVerb::Update(UpdateProductArgs { dry, .. }),
         } => dry.dry_run,
         _ => false,
     }
@@ -167,6 +170,7 @@ fn products_verb(verb: &ProductsVerb) -> &'static str {
     match verb {
         ProductsVerb::Records(verb) => records_verb(verb),
         ProductsVerb::Create(_) => "create",
+        ProductsVerb::Update(_) => "update",
     }
 }
 

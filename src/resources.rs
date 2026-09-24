@@ -8,6 +8,7 @@ pub enum Verb {
     Get,
     Create,
     Comment,
+    Update,
 }
 
 impl Verb {
@@ -17,6 +18,7 @@ impl Verb {
             Verb::Get => "get",
             Verb::Create => "create",
             Verb::Comment => "comment",
+            Verb::Update => "update",
         }
     }
 
@@ -30,6 +32,7 @@ impl Verb {
                 "POST",
                 format!("/{}/{{id}}/relationships/comments", resource.records_type),
             ),
+            Verb::Update => ("PUT", format!("/{}/{{id}}", resource.records_type)),
         }
     }
 }
@@ -49,7 +52,7 @@ pub static REVIEWS: Resource = Resource {
 pub static PRODUCTS: Resource = Resource {
     name: "products",
     records_type: "products",
-    verbs: &[Verb::Scroll, Verb::Get, Verb::Create],
+    verbs: &[Verb::Scroll, Verb::Get, Verb::Create, Verb::Update],
 };
 pub static QUESTIONS: Resource = Resource {
     name: "questions",

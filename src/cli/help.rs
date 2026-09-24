@@ -339,3 +339,34 @@ rate_limited (retry_after — сколько секунд ждать), server_er
 Коды выхода: 0 — создан (с -n — план); 2 — ошибка во входных данных, до сети; 3 — нет токена
 или он отклонён; 7 — rate limit, повторы исчерпаны; 1 — прочие ошибки, в том числе
 request_outcome_unknown (повтор безопасен).";
+
+pub(super) const PRODUCTS_UPDATE_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut products update 60757 --price 5490 --available true
+  aplaut products update 60757 --description \"Новое описание\" -n        # показать запрос, не отправляя
+
+  # Для агента: частичное обновление JSON-объектом; null очищает атрибут, в custom_attributes — удаляет ключ.
+  echo '{\"price\":5490,\"custom_attributes\":{\"color\":\"black\",\"old_key\":null}}' | aplaut products update 60757 --data - --json
+
+ID — внутренний идентификатор или external_id (без «.» и «/»). Меняются только переданные
+атрибуты, custom_attributes сливаются с текущими. Атрибуты — те же, что у create: вычисляемые
+rating, reviews_count, recommended сервер не меняет, поэтому они — unknown_attribute.
+--external-id NEW_ID переименовывает товар. С -n (--dry-run) токен проверяется, но запросов нет.
+
+Повторы: правка идемпотентна и повторяется после таймаута и 5xx, как чтение. Со сменой
+external_id — только если сервер точно не обработал запрос, иначе request_outcome_unknown.
+
+JSON (--json):
+  {\"ok\":true,\"command\":\"products.update\",\"cli_version\":…,\"dry_run\":false,
+   \"result\":{\"request\":{\"method\":\"PUT\",\"path\":\"/products/<id>\",
+   \"body\":{\"data\":{\"type\":\"products\",\"attributes\":{…}}}},
+   \"updated\":{\"id\",\"type\":\"products\",\"attributes\":{…}}},\"warnings\":[]}
+  С -n — тот же request, \"updated\":null и \"dry_run\":true.
+
+Ошибки: invalid_id, nothing_to_update, unknown_attribute, invalid_attribute, invalid_data,
+stdin_conflict, stdin_is_terminal, usage, not_found (товара нет), validation_failed (422),
+request_outcome_unknown, bad_response, no_token, invalid_token, unauthorized, forbidden,
+rate_limited (retry_after — сколько секунд ждать), server_error, network_error, timeout.
+
+Коды выхода: 0 — обновлён (с -n — план); 2 — ошибка во входных данных, до сети; 3 — нет токена
+или он отклонён; 5 — товара нет; 7 — rate limit, повторы исчерпаны; 1 — прочие ошибки.";

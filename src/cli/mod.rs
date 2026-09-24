@@ -120,6 +120,9 @@ pub enum ProductsVerb {
     /// Создать товар (POST /products): атрибуты флагами или JSON-объектом в --data
     #[command(after_help = LEAF_AFTER_HELP, after_long_help = PRODUCTS_CREATE_AFTER_LONG_HELP)]
     Create(CreateProductArgs),
+    /// Изменить товар (PUT /products/{id}): меняются только переданные атрибуты
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = PRODUCTS_UPDATE_AFTER_LONG_HELP)]
+    Update(UpdateProductArgs),
 }
 
 /// Атрибуты товара, общие для create и update (спека products-write §1). Описание может
@@ -159,6 +162,22 @@ pub struct ProductFields {
 pub struct CreateProductArgs {
     /// Id товара в вашей системе (обычно offer.id из YML); обязателен
     #[arg(long, value_name = "ID")]
+    pub external_id: Option<String>,
+    #[command(flatten)]
+    pub fields: ProductFields,
+    /// Атрибуты JSON-объектом из файла (`-` — из stdin); флаги перекрывают его ключи
+    #[arg(long, value_name = "FILE|-")]
+    pub data: Option<PathBuf>,
+    #[command(flatten)]
+    pub dry: DryRun,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct UpdateProductArgs {
+    /// Товар: внутренний или внешний (external_id) идентификатор
+    pub id: String,
+    /// Новый external_id — переименовать товар
+    #[arg(long, value_name = "NEW_ID")]
     pub external_id: Option<String>,
     #[command(flatten)]
     pub fields: ProductFields,
