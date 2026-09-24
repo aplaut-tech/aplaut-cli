@@ -16,10 +16,43 @@ use yaml_rust2::{Yaml, YamlLoader};
 
 const SPEC_PATH: &str = "spec/api.yaml";
 const HTTP_METHODS: [&str; 5] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
-/// Операции записи, для которых генерируется схема тела (спека reviews-write §7).
-const WRITE_OPERATIONS: [(&str, &str); 2] = [
-    ("POST", "/reviews"),
-    ("POST", "/reviews/{id}/relationships/comments"),
+/// Операция записи, для которой генерируется схема тела (спека reviews-write §7).
+struct WriteOp {
+    method: &'static str,
+    path: &'static str,
+    /// Операция, из тела которой берутся атрибуты.
+    schema: (&'static str, &'static str),
+    /// Частичное обновление: обязательных атрибутов нет.
+    partial: bool,
+}
+
+const WRITE_OPERATIONS: [WriteOp; 4] = [
+    WriteOp {
+        method: "POST",
+        path: "/reviews",
+        schema: ("POST", "/reviews"),
+        partial: false,
+    },
+    WriteOp {
+        method: "POST",
+        path: "/reviews/{id}/relationships/comments",
+        schema: ("POST", "/reviews/{id}/relationships/comments"),
+        partial: false,
+    },
+    WriteOp {
+        method: "POST",
+        path: "/products",
+        schema: ("POST", "/products"),
+        partial: false,
+    },
+    // Стейджинг, 2026-09-24 (спека products-write §6): PUT частичный и принимает атрибуты создания
+    // (категорию, бренд); схема PUT в спеке — `ProductAttributes` с вычисляемыми полями.
+    WriteOp {
+        method: "PUT",
+        path: "/products/{id}",
+        schema: ("POST", "/products"),
+        partial: true,
+    },
 ];
 
 fn main() {
@@ -112,8 +145,8 @@ fn main() {
     }
     writeln!(out, "];").unwrap();
     writeln!(out, "pub static WRITES: &[WriteSpec] = &[").unwrap();
-    for (method, path) in WRITE_OPERATIONS {
-        write_spec(&mut out, spec, method, path);
+    for op in &WRITE_OPERATIONS {
+        write_spec(&mut out, spec, op);
     }
     writeln!(out, "];").unwrap();
 
@@ -223,9 +256,14 @@ fn get_includes(spec: &Yaml) -> Vec<(String, Vec<String>)> {
 }
 
 /// Строка `WriteSpec { … }`: тип документа, обязательные и таблица атрибутов из схемы тела.
-fn write_spec(out: &mut String, spec: &Yaml, method: &str, path: &str) {
+fn write_spec(out: &mut String, spec: &Yaml, op: &WriteOp) {
+    let (method, path) = (op.method, op.path);
     let what = format!("{method} {path}");
-    let operation = &spec["paths"][path][method.to_ascii_lowercase().as_str()];
+    if spec["paths"][path][method.to_ascii_lowercase().as_str()].is_badvalue() {
+        panic!("spec: {what}: нет операции");
+    }
+    let (schema_method, schema_path) = op.schema;
+    let operation = &spec["paths"][schema_path][schema_method.to_ascii_lowercase().as_str()];
     let data = resolve(
         spec,
         &operation["requestBody"]["content"]["application/json"]["schema"]["properties"]["data"],
@@ -242,7 +280,11 @@ fn write_spec(out: &mut String, spec: &Yaml, method: &str, path: &str) {
     writeln!(
         out,
         "    WriteSpec {{ method: {method:?}, path: {path:?}, resource_type: {resource_type:?}, required: &{:?}, attributes: &[",
-        strings(&attributes["required"]),
+        if op.partial {
+            Vec::new()
+        } else {
+            strings(&attributes["required"])
+        },
     )
     .unwrap();
     for (name, schema) in properties {

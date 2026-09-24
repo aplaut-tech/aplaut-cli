@@ -220,4 +220,34 @@ mod tests {
         );
         assert!(write_spec("PUT", "/reviews/{id}").is_none());
     }
+
+    /// Стейджинг, 2026-09-24 (спека products-write §6): PUT частичный и принимает атрибуты создания.
+    #[test]
+    fn product_write_schemas_follow_staging() {
+        let create = write_spec("POST", "/products").expect("POST /products");
+        assert_eq!(create.resource_type, "products");
+        let mut required = create.required.to_vec();
+        required.sort_unstable();
+        assert_eq!(
+            required,
+            ["external_id", "name"],
+            "url добавляет команда (P3)"
+        );
+        assert_eq!(create.attribute("available").unwrap().ty, AttrType::Boolean);
+        assert_eq!(create.attribute("price").unwrap().ty, AttrType::Number);
+        assert_eq!(
+            create.attribute("category_names").unwrap().item_type,
+            Some(AttrType::String)
+        );
+        let update = write_spec("PUT", "/products/{id}").expect("PUT /products/{id}");
+        assert_eq!(
+            (update.resource_type, update.required),
+            ("products", &[][..])
+        );
+        assert!(update.attribute("category_name").is_some());
+        assert!(update.attribute("brand_name").is_some());
+        assert!(
+            update.attribute("rating").is_none() && update.attribute("reviews_count").is_none()
+        );
+    }
 }
