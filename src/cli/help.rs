@@ -315,7 +315,8 @@ pub(super) const SELF_UPDATE_AFTER_LONG_HELP: &str = "\
 JSON (--json):
   {\"ok\":true,\"command\":\"self.update\",\"dry_run\":false,\"result\":{\"current\":\"0.2.0\",
    \"latest\":\"0.3.0\",\"updated\":true},\"warnings\":[]}
-  updated: false — новее нет или --dry-run; latest — последний релиз.
+  updated: false — новее нет; с --dry-run — обновил бы или нет (ничего не поставлено);
+  latest — последний релиз.
 
 Ошибки: update_unavailable (поставлен не установщиком или релиза нет), update_failed (установщик
 завершился с ошибкой), unauthorized (GitHub отклонил APLAUT_CLI_GITHUB_TOKEN), rate_limited, timeout,

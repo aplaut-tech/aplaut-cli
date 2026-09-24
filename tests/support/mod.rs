@@ -164,6 +164,9 @@ pub enum Reply {
     Hangup,
     /// Принять запрос и молчать, затем закрыть соединение: так клиент видит таймаут.
     Stall(Duration),
+    /// Заголовки 200 и начало тела короче `Content-Length`, пауза, затем закрыть соединение: так
+    /// выглядят зависание (пауза дольше таймаута клиента) и обрыв (пауза 0) посреди тела.
+    Truncated(Duration),
 }
 
 impl Reply {
@@ -239,6 +242,13 @@ impl MockServer {
                     }) => write_response(&mut stream, status, &headers, &body),
                     Some(Reply::Hangup) => {}
                     Some(Reply::Stall(pause)) => std::thread::sleep(pause),
+                    Some(Reply::Truncated(pause)) => {
+                        let _ = stream.write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\nConnection: close\r\n\r\n{\"partial",
+                        );
+                        let _ = stream.flush();
+                        std::thread::sleep(pause);
+                    }
                     None => write_response(&mut stream, 599, &[], b"mock: no more replies"),
                 }
             }

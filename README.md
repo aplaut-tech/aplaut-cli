@@ -301,7 +301,7 @@ aplaut products update 60757 --price 5490 --available true
 | `validation_failed` | 1 | 422: сервер отклонил параметры |
 | `invalid_cursor` | 1 | сервер не принял курсор |
 | `cursor_mismatch` | 1 | курсор выдан для другого запроса |
-| `server_error` | 1 | 5xx; у 503 — `retry_after` |
+| `server_error` | 1 | 5xx; у 503 — `retry_after`. У `self update` — 5xx GitHub API, `retry_after` — `null` |
 | `request_outcome_unknown` | 1 | запись (POST или PUT со сменой `external_id`) оборвалась после отправки — таймаут, обрыв, 5xx кроме 503: неизвестно, выполнена ли она; CLI не повторяет, в `hint` — как проверить |
 | `unexpected_redirect` | 1 | 3xx: редиректы не выполняются |
 | `http_<status>` | 1 | прочие ответы HTTP без своего кода, например `http_409` |

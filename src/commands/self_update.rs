@@ -23,13 +23,14 @@ pub fn run(verb: SelfVerb, ctx: &Ctx) -> Result<Outcome, CliError> {
 }
 
 fn message(result: &SelfUpdate, dry_run: bool) -> String {
-    let text = if result.updated {
-        format!("aplaut обновлён: {} → {}", result.current, result.latest)
-    } else if result.update_available {
+    // По `update_available`, а не `updated`: под --dry-run `updated` — будущий результат (D2).
+    let text = if result.update_available && dry_run {
         format!(
             "доступна версия {} (установлена {})",
             result.latest, result.current
         )
+    } else if result.update_available {
+        format!("aplaut обновлён: {} → {}", result.current, result.latest)
     } else if result.latest == result.current {
         format!("aplaut {} — последняя версия", result.current)
     } else {
@@ -78,7 +79,7 @@ mod tests {
                 "aplaut 0.4.0-dev новее последнего релиза 0.3.0 — обновлять нечего",
             ),
             (
-                result("0.2.0", "0.3.0", false, true),
+                result("0.2.0", "0.3.0", true, true),
                 true,
                 "Пробный запуск, ничего не изменено: доступна версия 0.3.0 (установлена 0.2.0)",
             ),

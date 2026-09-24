@@ -201,10 +201,11 @@ fn dry_run_reports_the_newer_release_and_installs_nothing() {
     let downloads = MockServer::start(vec![installer(0)]);
     let api = MockServer::start(vec![release(&downloads, "9.9.9")]);
     let v = envelope(&install.run(&api, &["--dry-run", "--json"], &[]));
+    // Agent mode D2: под --dry-run result — будущий результат, `dry_run: true` — что его не было.
     assert_eq!(v["dry_run"], true);
     assert_eq!(
         v["result"],
-        json!({"current": CURRENT, "latest": "9.9.9", "updated": false})
+        json!({"current": CURRENT, "latest": "9.9.9", "updated": true})
     );
     assert!(!install.marker().exists());
     assert!(downloads.requests().is_empty());
@@ -297,6 +298,7 @@ fn github_errors_map_to_the_cli_catalog() {
         (404, "update_unavailable", 1, false),
         (401, "unauthorized", 3, false),
         (403, "rate_limited", 7, true),
+        (502, "server_error", 1, true),
     ] {
         let install = Install::new(&format!("self-http-{status}"));
         let api = MockServer::start(vec![Reply::text(status, "{}"), Reply::text(status, "{}")]);
@@ -420,4 +422,31 @@ fn missing_system_certificates_is_a_clear_error_not_a_panic() {
         "{err}"
     );
     assert!(api.requests().is_empty());
+}
+
+/// Финальное ревью: таймаут во время чтения тела reqwest отдаёт как `decode(TimedOut)` — это
+/// всё равно таймаут, а не «ответ не разобрался».
+#[test]
+fn installer_body_stalling_after_headers_is_a_timeout() {
+    let install = Install::new("self-body-stall");
+    let downloads = MockServer::start(vec![Reply::Truncated(Duration::from_secs(2))]);
+    let api = MockServer::start(vec![release(&downloads, "9.9.9")]);
+    let out = install.run(&api, &["--json", "--timeout", "1"], &[]);
+    assert_eq!(out.code, 1, "{}", out.stderr);
+    let err = out.error_json();
+    assert_eq!(err["error"]["code"], "timeout", "{err}");
+    assert_eq!(err["error"]["retryable"], true);
+    assert!(!install.marker().exists());
+}
+
+/// Обрыв посреди тела — сеть, повтор имеет смысл; «мусор» — только если не разобрался JSON.
+#[test]
+fn connection_dropped_mid_body_is_a_retryable_network_error() {
+    let install = Install::new("self-body-drop");
+    let api = MockServer::start(vec![Reply::Truncated(Duration::ZERO); 2]);
+    let out = install.run(&api, &["--json"], &[]);
+    assert_eq!(out.code, 1, "{}", out.stderr);
+    let err = out.error_json();
+    assert_eq!(err["error"]["code"], "network_error", "{err}");
+    assert_eq!(err["error"]["retryable"], true);
 }

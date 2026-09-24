@@ -71,7 +71,14 @@ pub fn self_update(opts: &Options) -> Result<SelfUpdate, CliError> {
         updated: false,
         update_available,
     };
-    if opts.dry_run || !update_available {
+    if opts.dry_run {
+        // Agent mode D2: под --dry-run result — будущий результат, `dry_run: true` — что его не было.
+        return Ok(SelfUpdate {
+            updated: update_available,
+            ..result
+        });
+    }
+    if !update_available {
         return Ok(result);
     }
     // Релиз уже получен: без always_update `run()` снова спросил бы GitHub (U11).
@@ -174,10 +181,14 @@ fn no_release() -> CliError {
 /// Ошибка HTTP от `axoupdater` приходит без заголовков: 403 не отличить от прочих — у GitHub API без
 /// токена это лимит (спека §2).
 fn map_http(err: &reqwest::Error) -> CliError {
-    if err.is_decode() {
+    // Таймаут при чтении тела reqwest отдаёт как `decode(TimedOut)` — сначала проверяем его.
+    if err.is_timeout() {
+        return CliError::general("timeout", "GitHub не ответил за --timeout").retryable(true);
+    }
+    if err.is_decode() && is_json_error(err) {
         return CliError::general(
             "update_failed",
-            format!("ответ GitHub не разобрался: {err}"),
+            format!("ответ GitHub не разобрался: {}", with_causes(err)),
         );
     }
     match err.status().map(|s| s.as_u16()) {
@@ -195,14 +206,28 @@ fn map_http(err: &reqwest::Error) -> CliError {
         )
         .retryable(true)
         .with_hint("задайте APLAUT_CLI_GITHUB_TOKEN — лимит станет выше"),
-        Some(status) => CliError::general("update_failed", format!("GitHub API ответил {status}")),
-        None if err.is_timeout() => {
-            CliError::general("timeout", "GitHub не ответил за --timeout").retryable(true)
+        Some(status @ 500..=599) => {
+            CliError::general("server_error", format!("GitHub API ответил {status}"))
+                .retryable(true)
         }
-        None => CliError::general("network_error", format!("нет связи с GitHub: {err}"))
+        Some(status) => CliError::general("update_failed", format!("GitHub API ответил {status}")),
+        // Сюда же — обрыв посреди тела: у reqwest это тоже `is_decode()`, но повтор имеет смысл.
+        None => CliError::general("network_error", format!("сбой связи с GitHub: {err}"))
             .retryable(true)
             .with_hint(NETWORK_HINT),
     }
+}
+
+/// «Не разобрался» — только когда в причинах ошибка JSON.
+fn is_json_error(err: &reqwest::Error) -> bool {
+    let mut cause = std::error::Error::source(err);
+    while let Some(inner) = cause {
+        if inner.is::<serde_json::Error>() {
+            return true;
+        }
+        cause = inner.source();
+    }
+    false
 }
 
 #[cfg(test)]
