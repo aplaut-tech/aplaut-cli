@@ -4,6 +4,8 @@
 //!   APLAUT_ACCESS_TOKEN_FILE=… cargo test --test e2e -- --ignored --test-threads=1
 //!
 //! Токен — из APLAUT_ACCESS_TOKEN_FILE или APLAUT_ACCESS_TOKEN; адрес стенда в коде не хранится.
+//! Круг записи (`review_write_round_trip`) создаёт и удаляет тестовый отзыв — только с
+//! APLAUT_E2E_WRITES=1.
 
 mod support;
 
@@ -132,4 +134,100 @@ fn wrong_token_is_exit_3_with_request_id() {
         .as_str()
         .unwrap()
         .contains("APLAUT_ACCESS_TOKEN"));
+}
+
+/// Круг записи (спека reviews-write §6): создать → get по внешнему и внутреннему id →
+/// комментарий → удалить. Пишет на стенд, поэтому только с APLAUT_E2E_WRITES=1; удаление — в
+/// guard, даже если тест упал.
+#[test]
+#[ignore]
+fn review_write_round_trip() {
+    if std::env::var("APLAUT_E2E_WRITES").as_deref() != Ok("1") {
+        eprintln!("пропущено: запись на стенд — только с APLAUT_E2E_WRITES=1");
+        return;
+    }
+    let external_id = format!("aplaut-cli-test-{}", unix_seconds());
+    // Guard — до создания: удаляет по внешнему id, даже если ответ на create не разобрался.
+    let _cleanup = Cleanup(external_id.clone());
+    let out = run(&[
+        "reviews",
+        "create",
+        "--rating",
+        "5",
+        "--body",
+        "Тестовый отзыв aplaut-cli, будет удалён",
+        "--author-name",
+        "aplaut-cli test",
+        "--state",
+        "waiting",
+        "--external-id",
+        &external_id,
+        "--json",
+    ]);
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    let created: serde_json::Value = serde_json::from_str(out.stdout.trim_end()).unwrap();
+    let id = created["result"]["created"]["id"]
+        .as_str()
+        .expect("id")
+        .to_string();
+    for key in [&external_id, &id] {
+        let out = run(&["reviews", "get", key, "--format", "jsonl"]);
+        assert_eq!(out.code, 0, "{key}: {}", out.stderr);
+        let record: serde_json::Value = serde_json::from_str(out.stdout.trim_end()).unwrap();
+        assert_eq!(
+            (
+                record["id"].as_str(),
+                record["attributes"]["external_id"].as_str()
+            ),
+            (Some(id.as_str()), Some(external_id.as_str()))
+        );
+    }
+    let out = run(&[
+        "reviews",
+        "comment",
+        &id,
+        "--text",
+        "Тестовый комментарий aplaut-cli",
+        "--author-name",
+        "aplaut-cli test",
+        "--json",
+    ]);
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    let comment: serde_json::Value = serde_json::from_str(out.stdout.trim_end()).unwrap();
+    assert_eq!(comment["result"]["created"]["type"], "comments");
+}
+
+fn unix_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+/// Удаляет тестовый отзыв по внешнему id. Токен — из окружения теста, не из argv.
+struct Cleanup(String);
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        let url = format!("{}/reviews/{}", base_url(), self.0);
+        let result = ureq::delete(&url)
+            .header("Authorization", format!("Bearer {}", token()))
+            .header("Accept", "application/vnd.api+json")
+            .call();
+        match result {
+            Ok(_) | Err(ureq::Error::StatusCode(404)) => {}
+            Err(err) => eprintln!(
+                "НЕ УДАЛЁН тестовый отзыв {}: {err} — удалите вручную",
+                self.0
+            ),
+        }
+    }
+}
+
+fn token() -> String {
+    match std::env::var("APLAUT_ACCESS_TOKEN_FILE") {
+        Ok(path) => std::fs::read_to_string(path).unwrap().trim().to_string(),
+        Err(_) => std::env::var("APLAUT_ACCESS_TOKEN")
+            .expect("задайте APLAUT_ACCESS_TOKEN_FILE или APLAUT_ACCESS_TOKEN"),
+    }
 }

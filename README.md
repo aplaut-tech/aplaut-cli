@@ -310,6 +310,7 @@ mise install            # тулчейн 1.98.1, musl-таргет, cargo-dist
 cargo test              # модульные и интеграционные тесты с мок-сервером
 cargo build --release --target x86_64-unknown-linux-musl
 APLAUT_E2E_BASE_URL=… APLAUT_ACCESS_TOKEN_FILE=… cargo test --test e2e -- --ignored --test-threads=1
+APLAUT_E2E_WRITES=1 …  # то же плюс круг записи: создаёт и удаляет тестовый отзыв
 dist plan               # что соберёт релиз; релиз — push тега vX.Y.Z
 ```
 
