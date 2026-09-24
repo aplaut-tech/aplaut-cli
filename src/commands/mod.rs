@@ -5,6 +5,7 @@ pub mod products;
 pub mod profile;
 pub mod records;
 pub mod reviews;
+pub mod self_update;
 pub mod writes;
 
 use std::io::{self, IsTerminal};
@@ -18,7 +19,7 @@ use crate::api_error::ErrorContext;
 use crate::auth::{EnvSnapshot, StdinSource, TokenFlags, DEFAULT_BASE_URL};
 use crate::cli::{
     AuthVerb, Command, CommentArgs, CreateProductArgs, CreateReviewArgs, GlobalArgs, ProductsVerb,
-    ProfileVerb, RecordsVerb, ReviewsVerb, UpdateProductArgs,
+    ProfileVerb, RecordsVerb, ReviewsVerb, SelfVerb, UpdateProductArgs,
 };
 use crate::clock::Clock;
 use crate::config::{self, Paths};
@@ -110,6 +111,7 @@ pub fn dispatch(command: Command, ctx: &Ctx) -> Result<Outcome, CliError> {
         Command::Questions { verb } => records::run(&resources::QUESTIONS, verb, ctx),
         Command::Auth { verb } => auth::run(verb, ctx),
         Command::Profile { verb } => profile::run(verb, ctx),
+        Command::SelfCmd { verb } => self_update::run(verb, ctx),
     }
 }
 
@@ -122,6 +124,9 @@ pub fn is_dry_run(command: &Command) -> bool {
         } => dry.dry_run,
         Command::Auth {
             verb: AuthVerb::Login(dry) | AuthVerb::Logout(dry),
+        } => dry.dry_run,
+        Command::SelfCmd {
+            verb: SelfVerb::Update(dry),
         } => dry.dry_run,
         Command::Reviews {
             verb: ReviewsVerb::Create(CreateReviewArgs { dry, .. }),
@@ -160,6 +165,12 @@ pub fn command_name(command: &Command) -> String {
                 ProfileVerb::Set { .. } => "set",
                 ProfileVerb::Delete { .. } => "delete",
                 ProfileVerb::Edit => "edit",
+            },
+        ),
+        Command::SelfCmd { verb } => (
+            "self",
+            match verb {
+                SelfVerb::Update(_) => "update",
             },
         ),
     };

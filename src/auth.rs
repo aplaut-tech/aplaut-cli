@@ -24,6 +24,8 @@ pub struct EnvSnapshot {
     pub home: Option<PathBuf>,
     /// `$VISUAL`, иначе `$EDITOR` — для `profile edit`.
     pub editor: Option<String>,
+    /// `APLAUT_CLI_GITHUB_TOKEN` — для `self update`: то же имя, что у установщика cargo-dist.
+    pub github_token: Option<String>,
     pub term: TermEnv,
 }
 
@@ -38,6 +40,7 @@ impl EnvSnapshot {
             xdg_config_home: var("XDG_CONFIG_HOME").map(PathBuf::from),
             home: var("HOME").map(PathBuf::from),
             editor: var("VISUAL").or_else(|| var("EDITOR")),
+            github_token: var("APLAUT_CLI_GITHUB_TOKEN"),
             term: TermEnv::capture(),
         }
     }

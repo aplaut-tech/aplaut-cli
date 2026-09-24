@@ -62,7 +62,8 @@ pub static QUESTIONS: Resource = Resource {
 
 pub static ALL: &[&Resource] = &[&REVIEWS, &PRODUCTS, &QUESTIONS];
 
-/// Команды без операции API: работают только с локальными файлами.
+/// Команды без операции Platform API: локальные файлы и самообновление (`self update` ходит в
+/// GitHub Releases).
 pub static LOCAL_COMMANDS: &[&str] = &[
     "auth login",
     "auth logout",
@@ -71,6 +72,7 @@ pub static LOCAL_COMMANDS: &[&str] = &[
     "profile set",
     "profile delete",
     "profile edit",
+    "self update",
 ];
 
 pub fn find(name: &str) -> Option<&'static Resource> {

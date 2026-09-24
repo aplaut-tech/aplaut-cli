@@ -302,6 +302,28 @@ config_changed_during_edit, io_error.
 
 Коды выхода: 0 — сохранено или без изменений; 2 — нет терминала; 1 — прочие ошибки.";
 
+pub(super) const SELF_UPDATE_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut self update             # последний релиз — тем же установщиком, в тот же каталог
+  aplaut self update --dry-run   # только проверить, есть ли новая версия
+  aplaut self update --json
+
+Работает, если aplaut поставлен установщиком из README: тот оставляет файл установки (receipt) в
+~/.config/aplaut-cli/. Поставленный иначе обновляйте тем же способом, которым ставили.
+Без токена GitHub даёт 60 запросов в час; в CI задайте APLAUT_CLI_GITHUB_TOKEN.
+
+JSON (--json):
+  {\"ok\":true,\"command\":\"self.update\",\"dry_run\":false,\"result\":{\"current\":\"0.2.0\",
+   \"latest\":\"0.3.0\",\"updated\":true},\"warnings\":[]}
+  updated: false — новее нет или --dry-run; latest — последний релиз.
+
+Ошибки: update_unavailable (поставлен не установщиком или релиза нет), update_failed (установщик
+завершился с ошибкой), unauthorized (GitHub отклонил APLAUT_CLI_GITHUB_TOKEN), rate_limited, timeout,
+network_error.
+
+Коды выхода: 0 — готово (с --dry-run — проверка); 3 — GitHub отклонил токен; 7 — лимит GitHub API;
+1 — прочие ошибки.";
+
 pub(super) const PRODUCTS_CREATE_AFTER_LONG_HELP: &str = "\
 Примеры:
   aplaut products create --external-id 60757 --name \"Transcend StoreJet 1 ТБ\" --url https://shop.example/p/60757 --price 5990 --available true --category-id 297

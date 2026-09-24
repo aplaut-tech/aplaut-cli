@@ -38,6 +38,9 @@ pub fn self_update(opts: &Options) -> Result<SelfUpdate, CliError> {
     let current: Version = env!("CARGO_PKG_VERSION")
         .parse()
         .expect("версия пакета — semver");
+    // Клиент — до `new_for`: тот собирает `reqwest::Client::new()` и без системных корней
+    // сертификатов паникует; наш клиент на том же месте возвращает ошибку.
+    let client = http_client(opts.timeout)?;
     let mut updater = AxoUpdater::new_for(APP_NAME);
     updater.load_receipt().map_err(map_error)?;
     ensure_receipt_is_for_this_binary(&updater)?;
@@ -46,7 +49,7 @@ pub fn self_update(opts: &Options) -> Result<SelfUpdate, CliError> {
         .set_current_version(current.clone())
         .map_err(map_error)?;
     updater
-        .set_client(http_client(opts.timeout)?)
+        .set_client(client)
         .disable_installer_stdout()
         .enable_installer_stderr();
     if let Some(token) = opts.github_token {
@@ -105,11 +108,30 @@ fn ensure_receipt_is_for_this_binary(updater: &AxoUpdater) -> Result<(), CliErro
 }
 
 /// Клиент `axoupdater` по умолчанию без таймаута: зависшее соединение повесило бы агента (U10).
+/// Сборка падает, если в системе нет корней сертификатов (`rustls-platform-verifier`).
 pub fn http_client(timeout: Duration) -> Result<reqwest::Client, CliError> {
     reqwest::Client::builder()
         .timeout(timeout)
         .build()
-        .map_err(|e| CliError::general("update_failed", format!("HTTP-клиент не собрался: {e}")))
+        .map_err(|e| {
+            CliError::general(
+                "update_failed",
+                format!("HTTP-клиент для GitHub не собрался: {}", with_causes(&e)),
+            )
+            .with_hint(NETWORK_HINT)
+        })
+}
+
+/// `Display` у `reqwest::Error` — только «builder error»; причина — в цепочке `source()`.
+fn with_causes(err: &dyn std::error::Error) -> String {
+    let mut text = err.to_string();
+    let mut cause = err.source();
+    while let Some(inner) = cause {
+        text.push_str(": ");
+        text.push_str(&inner.to_string());
+        cause = inner.source();
+    }
+    text
 }
 
 /// Ошибки `axoupdater` — в каталог CLI (спека §2).

@@ -53,7 +53,40 @@ impl Output {
 /// Запускает бинарь с чистым окружением: HOME и XDG_CONFIG_HOME указывают во временный каталог,
 /// stdin/stdout/stderr — пайпы (то есть не TTY).
 pub fn aplaut(home: &Path, args: &[&str], env: &[(&str, &str)], stdin: &str) -> Output {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_aplaut"));
+    aplaut_exe(
+        Path::new(env!("CARGO_BIN_EXE_aplaut")),
+        home,
+        args,
+        env,
+        stdin,
+    )
+}
+
+/// Только что скопированный бинарь может не запуститься с ETXTBSY: параллельный тест сделал `fork`,
+/// пока файл был открыт на запись, и дочерний процесс держит дескриптор до своего `exec`
+/// (rust-lang/rust#114554). Дескриптор закрывается за миллисекунды — повторяем.
+fn spawn_retrying_busy(cmd: &mut Command) -> std::process::Child {
+    for _ in 0..50 {
+        match cmd.spawn() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            other => return other.expect("запуск aplaut"),
+        }
+    }
+    cmd.spawn().expect("запуск aplaut: файл всё ещё занят")
+}
+
+/// То же для указанного бинаря: `self update` запускает копию, чтобы установщик не тронул
+/// `target/debug/aplaut`.
+pub fn aplaut_exe(
+    exe: &Path,
+    home: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+    stdin: &str,
+) -> Output {
+    let mut cmd = Command::new(exe);
     cmd.args(args)
         .env_clear()
         .env("HOME", home)
@@ -65,7 +98,7 @@ pub fn aplaut(home: &Path, args: &[&str], env: &[(&str, &str)], stdin: &str) -> 
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = cmd.spawn().expect("запуск aplaut");
+    let mut child = spawn_retrying_busy(&mut cmd);
     if let Some(mut input) = child.stdin.take() {
         let _ = input.write_all(stdin.as_bytes());
     }

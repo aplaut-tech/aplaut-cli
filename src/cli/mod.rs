@@ -110,6 +110,12 @@ pub enum Command {
         #[command(subcommand)]
         verb: ProfileVerb,
     },
+    /// Сам aplaut: обновление до последнего релиза
+    #[command(name = "self", arg_required_else_help = true)]
+    SelfCmd {
+        #[command(subcommand)]
+        verb: SelfVerb,
+    },
 }
 
 /// У товаров, кроме общих глаголов чтения, есть запись (спека products-write P1).
@@ -367,6 +373,14 @@ pub enum AuthVerb {
     /// Удалить токен профиля
     #[command(after_help = LEAF_AFTER_HELP, after_long_help = AUTH_LOGOUT_AFTER_LONG_HELP)]
     Logout(DryRun),
+}
+
+/// Глаголы `aplaut self` (спека self-update U1); `self` — ключевое слово Rust, отсюда `SelfCmd`.
+#[derive(Debug, Subcommand)]
+pub enum SelfVerb {
+    /// Поставить последний релиз тем же установщиком, которым поставлен этот aplaut
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = SELF_UPDATE_AFTER_LONG_HELP)]
+    Update(DryRun),
 }
 
 /// `--dry-run` у команд, которые что-то меняют (спека agent mode §5).
