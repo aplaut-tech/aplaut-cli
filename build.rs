@@ -3,6 +3,9 @@
 //! Допустимые фильтры и include для scroll есть в спеке только как markdown-таблицы в
 //! `description`, поэтому разбираем их. Не разобралось — падаем: пустая таблица молча
 //! отключила бы локальную валидацию, а сервер неизвестный `include` просто игнорирует.
+//!
+//! Для `get` и записи — `include` из параметров `GET /{type}/{id}` и схемы тел
+//! `WRITE_OPERATIONS` (спека reviews-write §7).
 
 use std::env;
 use std::fmt::Write as _;
@@ -13,6 +16,11 @@ use yaml_rust2::{Yaml, YamlLoader};
 
 const SPEC_PATH: &str = "spec/api.yaml";
 const HTTP_METHODS: [&str; 5] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+/// Операции записи, для которых генерируется схема тела (спека reviews-write §7).
+const WRITE_OPERATIONS: [(&str, &str); 2] = [
+    ("POST", "/reviews"),
+    ("POST", "/reviews/{id}/relationships/comments"),
+];
 
 fn main() {
     println!("cargo:rerun-if-changed={SPEC_PATH}");
@@ -98,6 +106,16 @@ fn main() {
         operations(spec)
     )
     .unwrap();
+    writeln!(out, "pub static GET_INCLUDES: &[(&str, &[&str])] = &[").unwrap();
+    for (records_type, includes) in get_includes(spec) {
+        writeln!(out, "    ({records_type:?}, &{includes:?}),").unwrap();
+    }
+    writeln!(out, "];").unwrap();
+    writeln!(out, "pub static WRITES: &[WriteSpec] = &[").unwrap();
+    for (method, path) in WRITE_OPERATIONS {
+        write_spec(&mut out, spec, method, path);
+    }
+    writeln!(out, "];").unwrap();
 
     let dest = Path::new(&env::var("OUT_DIR").unwrap()).join("spec_tables.rs");
     fs::write(dest, out).unwrap();
@@ -160,4 +178,121 @@ fn operations(spec: &Yaml) -> Vec<(String, String)> {
         }
     }
     ops
+}
+
+/// `$ref` вида `#/components/…` → узел, на который он указывает (цепочки тоже).
+fn resolve<'a>(spec: &'a Yaml, node: &'a Yaml, what: &str) -> &'a Yaml {
+    let Some(reference) = node["$ref"].as_str() else {
+        return node;
+    };
+    let pointer = reference
+        .strip_prefix("#/")
+        .unwrap_or_else(|| panic!("spec: {what}: внешний $ref {reference}"));
+    let target = pointer.split('/').fold(spec, |node, key| &node[key]);
+    if target.is_badvalue() {
+        panic!("spec: {what}: $ref {reference} не найден");
+    }
+    resolve(spec, target, what)
+}
+
+/// `GET /{type}/{id}` → перечисление `include` этой операции (пусто, если параметра нет).
+fn get_includes(spec: &Yaml) -> Vec<(String, Vec<String>)> {
+    let paths = spec["paths"].as_hash().expect("spec: нет paths");
+    let mut out = Vec::new();
+    for (path, item) in paths {
+        let path = text(path, "path");
+        let Some(records_type) = path.strip_prefix('/').and_then(|p| p.strip_suffix("/{id}"))
+        else {
+            continue;
+        };
+        let get = &item["get"];
+        if records_type.contains('/') || get.is_badvalue() {
+            continue;
+        }
+        let includes = get["parameters"]
+            .as_vec()
+            .into_iter()
+            .flatten()
+            .map(|p| resolve(spec, p, path))
+            .find(|p| p["name"].as_str() == Some("include") && p["in"].as_str() == Some("query"))
+            .map(|p| enum_values(&p["schema"], path))
+            .unwrap_or_default();
+        out.push((records_type.to_string(), includes));
+    }
+    out
+}
+
+/// Строка `WriteSpec { … }`: тип документа, обязательные и таблица атрибутов из схемы тела.
+fn write_spec(out: &mut String, spec: &Yaml, method: &str, path: &str) {
+    let what = format!("{method} {path}");
+    let operation = &spec["paths"][path][method.to_ascii_lowercase().as_str()];
+    let data = resolve(
+        spec,
+        &operation["requestBody"]["content"]["application/json"]["schema"]["properties"]["data"],
+        &what,
+    );
+    let resource_type = enum_values(&data["properties"]["type"], &what)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| panic!("spec: {what}: пустой enum type"));
+    let attributes = resolve(spec, &data["properties"]["attributes"], &what);
+    let properties = attributes["properties"]
+        .as_hash()
+        .unwrap_or_else(|| panic!("spec: {what}: нет properties атрибутов"));
+    writeln!(
+        out,
+        "    WriteSpec {{ method: {method:?}, path: {path:?}, resource_type: {resource_type:?}, required: &{:?}, attributes: &[",
+        strings(&attributes["required"]),
+    )
+    .unwrap();
+    for (name, schema) in properties {
+        let name = text(name, &what);
+        let at = format!("{what}: {name}");
+        let schema = resolve(spec, schema, &at);
+        let ty = attr_type(&schema["type"], &at);
+        let item_type = match ty {
+            "Array" => format!(
+                "Some(AttrType::{})",
+                attr_type(&resolve(spec, &schema["items"], &at)["type"], &at)
+            ),
+            _ => "None".to_string(),
+        };
+        writeln!(
+            out,
+            "        AttributeSpec {{ name: {name:?}, ty: AttrType::{ty}, enum_values: &{:?}, minimum: {:?}, maximum: {:?}, format: {:?}, item_type: {item_type} }},",
+            strings(&schema["enum"]),
+            number(&schema["minimum"]),
+            number(&schema["maximum"]),
+            schema["format"].as_str(),
+        )
+        .unwrap();
+    }
+    writeln!(out, "    ] }},").unwrap();
+}
+
+fn attr_type(node: &Yaml, what: &str) -> &'static str {
+    match text(node, what) {
+        "string" => "String",
+        "number" => "Number",
+        "integer" => "Integer",
+        "boolean" => "Boolean",
+        "array" => "Array",
+        "object" => "Object",
+        other => panic!("spec: {what}: неизвестный type {other}"),
+    }
+}
+
+fn strings(node: &Yaml) -> Vec<String> {
+    node.as_vec()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn number(node: &Yaml) -> Option<f64> {
+    node.as_f64().or_else(|| node.as_i64().map(|v| v as f64))
 }
