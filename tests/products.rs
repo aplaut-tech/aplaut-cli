@@ -355,3 +355,103 @@ fn only_a_taken_external_id_points_to_update() {
         "{hint}"
     );
 }
+
+/// 2xx без записи у повторяемой правки: повтор безопасен (retryable), проверить — get.
+#[test]
+fn update_answered_without_a_record_says_how_to_check() {
+    let server = MockServer::start(vec![Reply::text(200, "")]);
+    let out = run(
+        &server,
+        &["products", "update", "60757", "--price", "1"],
+        "",
+    );
+    assert_eq!(out.code, 1, "{}", out.stderr);
+    let err = out.error_json();
+    assert_eq!(
+        (
+            err["error"]["code"].as_str(),
+            err["error"]["retryable"].as_bool()
+        ),
+        (Some("bad_response"), Some(true))
+    );
+    let hint = err["error"]["hint"].as_str().unwrap();
+    assert!(
+        hint.contains("aplaut products get 60757") && !hint.contains("не повторяйте"),
+        "{hint}"
+    );
+}
+
+/// Путь по внутреннему id, а external_id в теле прежний — это не переименование, но и не
+/// повтор: CLI не отличает внутренний id от внешнего.
+#[test]
+fn external_id_in_the_body_under_an_internal_id_is_not_replayed_and_hint_is_neutral() {
+    let server = MockServer::start(vec![Reply::text(500, "oops"), product(200, "p1")]);
+    let out = run(
+        &server,
+        &[
+            "products",
+            "update",
+            "65c33dc52150a300018736dc",
+            "--data",
+            "-",
+        ],
+        r#"{"external_id": "60757", "price": 1}"#,
+    );
+    assert_eq!(out.code, 1, "{}", out.stderr);
+    let hint = out.error_json()["error"]["hint"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        hint.contains("aplaut products get 60757") && !hint.contains("переименован"),
+        "{hint}"
+    );
+    assert_eq!(server.requests().len(), 1);
+}
+
+#[test]
+fn same_external_id_as_the_path_stays_replayable() {
+    let server = MockServer::start(vec![Reply::text(500, "oops"), product(200, "p1")]);
+    let out = run(
+        &server,
+        &[
+            "products",
+            "update",
+            "60757",
+            "--external-id",
+            "60757",
+            "--price",
+            "1",
+        ],
+        "",
+    );
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    assert_eq!(server.requests().len(), 2);
+}
+
+#[test]
+fn create_hint_for_an_unaddressable_external_id_points_to_the_dashboard() {
+    let server = MockServer::start(vec![Reply::text(500, "oops")]);
+    let out = run(
+        &server,
+        &[
+            "products",
+            "create",
+            "--external-id",
+            "sku.1",
+            "--name",
+            "x",
+            "--url",
+            "https://x",
+        ],
+        "",
+    );
+    let hint = out.error_json()["error"]["hint"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        hint.contains("личном кабинете") && !hint.contains("products get sku.1"),
+        "{hint}"
+    );
+}

@@ -73,7 +73,7 @@ pub struct GlobalArgs {
     /// Таймаут одного запроса, секунд
     #[arg(long, global = true, value_name = "SECONDS", default_value_t = 30)]
     pub timeout: u64,
-    /// Сколько раз повторять запрос после 429, 5xx и сетевых сбоев (запись — только если сервер её точно не получил)
+    /// Сколько раз повторять запрос после 429, 5xx и сетевых сбоев (create и comment — только если сервер его точно не получил)
     #[arg(long, global = true, value_name = "N", default_value_t = 6)]
     pub max_retries: u32,
 }

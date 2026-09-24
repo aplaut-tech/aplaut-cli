@@ -89,7 +89,7 @@ fn update(args: &UpdateProductArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
         Some(new) if check_id(new, "external_id").is_ok() => (
             Replay::OnlyIfUnprocessed,
             format!(
-                "проверьте, переименован ли товар: aplaut products get {}",
+                "проверьте, изменён ли товар: aplaut products get {}",
                 shell_word(new)
             ),
         ),
@@ -97,7 +97,13 @@ fn update(args: &UpdateProductArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
             Replay::OnlyIfUnprocessed,
             "проверьте товар в личном кабинете, прежде чем повторять".to_string(),
         ),
-        None => (Replay::Safe, String::new()),
+        None => (
+            Replay::Safe,
+            format!(
+                "проверьте товар: aplaut products get {}",
+                shell_word(&args.id)
+            ),
+        ),
     };
     let path = template.replace("{id}", &http::path_segment(&args.id));
     let submission = Submission {

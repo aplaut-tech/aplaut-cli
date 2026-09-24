@@ -1,6 +1,6 @@
-//! Запись одним POST (спека reviews-write §3–5): атрибуты из `--data` и флагов, проверка по
-//! схеме тела из спеки до сети, документ JSON:API. Идемпотентности у API нет, поэтому ошибка во
-//! входных данных должна ловиться здесь, а не повтором запроса.
+//! Запись одним запросом — POST или PUT (спеки reviews-write §3–5, products-write §3): атрибуты из
+//! `--data` и флагов, проверка по схеме тела из спеки до сети, документ JSON:API. POST у API не
+//! идемпотентен, поэтому ошибка во входных данных должна ловиться здесь, а не повтором запроса.
 
 use std::fs;
 use std::path::Path;
@@ -195,15 +195,21 @@ pub fn submit(
         .and_then(|mut doc| doc.get_mut("data").map(Value::take))
         .filter(Value::is_object)
         .ok_or_else(|| {
-            // Запрос выполнен (2xx): повтор создал бы дубль, поэтому retryable остаётся false.
+            // Запрос выполнен (2xx): повтор POST создал бы дубль, повтор идемпотентного PUT — нет.
             CliError::general(
                 "bad_response",
                 format!("сервер ответил {}, но в теле нет записи", response.status),
             )
+            .retryable(replay == Replay::Safe)
             .with_request_id(response.request_id.clone())
-            .with_hint(format!(
-                "запрос, скорее всего, выполнен — не повторяйте вслепую: {verify}"
-            ))
+            .with_hint(match replay {
+                Replay::Safe => {
+                    format!("запрос, скорее всего, выполнен; повторить его безопасно — {verify}")
+                }
+                Replay::OnlyIfUnprocessed => {
+                    format!("запрос, скорее всего, выполнен — не повторяйте вслепую: {verify}")
+                }
+            })
         })
 }
 
