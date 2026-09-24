@@ -18,7 +18,7 @@ use crate::http::{self, ApiClient, Pace};
 use crate::output::{Commit, RecordSink};
 use crate::page::Page;
 use crate::state::{self, ScrollParams, ScrollState};
-use crate::term::Reporter;
+use crate::term::{shell_word, Reporter};
 
 /// Страниц подряд без новых записей, после которых обход считается зациклившимся.
 pub const MAX_STALE_PAGES: u32 = 3;
@@ -285,17 +285,6 @@ fn last_sort_value(page: &Page, sort: &str) -> Option<String> {
         .get(field)?
         .as_str()
         .map(str::to_string)
-}
-
-/// Значение для копирования в шелл: в кавычках, если в нём есть что-то кроме безопасных символов.
-fn shell_word(s: &str) -> String {
-    if s.chars()
-        .all(|c| c.is_ascii_alphanumeric() || "_:.,@%+=/-".contains(c))
-    {
-        s.to_string()
-    } else {
-        format!("'{}'", s.replace('\'', "'\\''"))
-    }
 }
 
 /// Параметры уходят только при открытии; при продолжении — один курсор, иначе сервер вернёт 400.

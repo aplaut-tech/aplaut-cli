@@ -10,6 +10,7 @@ use serde_json::{Map, Value};
 
 use crate::auth::StdinSource;
 use crate::error::CliError;
+use crate::http::{self, ApiClient};
 use crate::spec::{AttrType, AttributeSpec, WriteSpec};
 use crate::suggest;
 use crate::time;
@@ -159,6 +160,39 @@ pub fn request(spec: &WriteSpec, path: String, attributes: Map<String, Value>) -
         path,
         body: serde_json::json!({"data": {"type": spec.resource_type, "attributes": attributes}}),
     }
+}
+
+/// Отправка (W7). 2xx — запись создана: `data` ответа. Исход неизвестен — в подсказке `verify`:
+/// как проверить, прежде чем повторять.
+pub fn submit(
+    api: &mut ApiClient,
+    request: &WriteRequest,
+    verify: &str,
+) -> Result<Value, CliError> {
+    let response =
+        api.post(&request.path, &request.body)
+            .map_err(|err| match err.code.as_str() {
+                http::OUTCOME_UNKNOWN => err.with_hint(verify),
+                _ => err,
+            })?;
+    serde_json::from_slice::<Value>(&response.body)
+        .ok()
+        .and_then(|mut doc| doc.get_mut("data").map(Value::take))
+        .filter(Value::is_object)
+        .ok_or_else(|| {
+            // Запрос выполнен (2xx): повтор создал бы дубль, поэтому retryable остаётся false.
+            CliError::general(
+                "bad_response",
+                format!(
+                    "сервер ответил {}, но в теле нет созданной записи",
+                    response.status
+                ),
+            )
+            .with_request_id(response.request_id.clone())
+            .with_hint(format!(
+                "запрос, скорее всего, выполнен — не повторяйте вслепую: {verify}"
+            ))
+        })
 }
 
 /// Что не так со значением: для сообщения и подсказки.

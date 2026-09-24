@@ -55,7 +55,8 @@ fn every_error_and_warning_code_is_documented_in_readme() {
             .flat_map(move |m| codes_after(t, m))
         })
         .collect();
-    // Собираются не литералом в конструкторе: `CliError::io`, транспорт (`http.rs`), 401 (`api_error.rs`).
+    // Собираются не литералом в конструкторе: `CliError::io`, транспорт и `http::OUTCOME_UNKNOWN`
+    // (`http.rs`), 401 (`api_error.rs`).
     codes.extend(
         [
             "io_error",
@@ -64,6 +65,7 @@ fn every_error_and_warning_code_is_documented_in_readme() {
             "response_too_large",
             "unauthorized",
             "invalid_token",
+            "request_outcome_unknown",
         ]
         .map(String::from),
     );

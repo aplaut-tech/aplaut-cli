@@ -131,6 +131,40 @@ server_error, network_error, timeout.
 Коды выхода: 0 — успех; 2 — ошибка в параметрах; 3 — нет токена или он отклонён; 5 — записи нет;
 7 — rate limit, повторы исчерпаны; 1 — прочие ошибки.";
 
+const REVIEWS_CREATE_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut reviews create --rating 5 --body \"Отличный магазин\" --author-name \"Анна\" --external-id crm-4211
+  aplaut reviews create --rating 4 --body \"Хорошо\" --product-id 444772 -n   # показать запрос, не отправляя
+
+  # Для агента: атрибуты — JSON-объектом из stdin, итог — одной строкой JSON в stdout.
+  echo '{\"rating\":5,\"body\":\"Спасибо!\",\"photos\":[\"https://…/1.jpg\"],\"external_id\":\"crm-4211\"}' \\
+    | aplaut reviews create --data - --json
+
+Атрибуты — из схемы тела POST /reviews в спеке; флаги перекрывают одноимённые ключи --data.
+Через --data передаётся всё, для чего нет флага: photos, tags, rating_details, dimensions,
+custom_attributes, даты, hide_my_data и т. д. Без product_id отзыв создаётся о компании.
+С -n (--dry-run) токен проверяется, но запросов нет.
+
+Повторы: CLI повторяет запрос сам, только если сервер его точно не обработал (429, 503,
+соединение не установилось). Иначе — request_outcome_unknown: проверьте, создан ли отзыв,
+прежде чем повторять. С --external-id проверка — aplaut reviews get <external_id>.
+
+JSON (--json):
+  {\"ok\":true,\"command\":\"reviews.create\",\"cli_version\":…,\"dry_run\":false,
+   \"result\":{\"request\":{\"method\":\"POST\",\"path\":\"/reviews\",
+   \"body\":{\"data\":{\"type\":\"reviews\",\"attributes\":{…}}}},
+   \"created\":{\"id\",\"type\":\"reviews\",\"attributes\":{…}}},\"warnings\":[]}
+  С -n — тот же request, \"created\":null и \"dry_run\":true.
+
+Ошибки: unknown_attribute (в hint — допустимые), invalid_attribute, missing_attribute,
+invalid_data, stdin_conflict, stdin_is_terminal, validation_failed (422, в field — атрибут),
+request_outcome_unknown, bad_response, no_token, invalid_token, unauthorized, forbidden,
+rate_limited (retry_after — сколько секунд ждать), server_error, network_error.
+
+Коды выхода: 0 — создан (с -n — план); 2 — ошибка во входных данных, до сети; 3 — нет токена
+или он отклонён; 7 — rate limit, повторы исчерпаны; 1 — прочие ошибки, в том числе
+request_outcome_unknown (исход неизвестен — проверьте, прежде чем повторять).";
+
 /// Короткая справка (`-h`) листовых команд отсылает к длинной.
 const LEAF_AFTER_HELP: &str = "Примеры, поля JSON (--json) и коды выхода: --help";
 
@@ -312,7 +346,7 @@ pub enum Command {
     #[command(arg_required_else_help = true)]
     Reviews {
         #[command(subcommand)]
-        verb: RecordsVerb,
+        verb: ReviewsVerb,
     },
     /// Товары
     #[command(arg_required_else_help = true)]
@@ -338,6 +372,54 @@ pub enum Command {
         #[command(subcommand)]
         verb: ProfileVerb,
     },
+}
+
+/// У отзывов, кроме общих глаголов чтения, есть запись (спека reviews-write W1).
+#[derive(Debug, Subcommand)]
+pub enum ReviewsVerb {
+    #[command(flatten)]
+    Records(RecordsVerb),
+    /// Создать отзыв (POST /reviews): атрибуты флагами или JSON-объектом в --data
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = REVIEWS_CREATE_AFTER_LONG_HELP)]
+    Create(CreateReviewArgs),
+}
+
+/// Частые атрибуты — флагами, остальные — через `--data` (W5). Свободный текст может начинаться
+/// с `-` (список в достоинствах), поэтому у текстовых флагов `allow_hyphen_values`.
+#[derive(Debug, Clone, Args)]
+pub struct CreateReviewArgs {
+    /// Оценка, число от 1 до 5
+    #[arg(long, value_name = "N")]
+    pub rating: Option<String>,
+    /// Текст отзыва
+    #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+    pub body: Option<String>,
+    /// Достоинства
+    #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+    pub pros: Option<String>,
+    /// Недостатки
+    #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+    pub cons: Option<String>,
+    /// Товар (обычно offer.id из YML); без него отзыв — о компании
+    #[arg(long, value_name = "ID")]
+    pub product_id: Option<String>,
+    /// Id отзыва в вашей системе: по нему get проверит, создан ли отзыв после сбоя
+    #[arg(long, value_name = "ID")]
+    pub external_id: Option<String>,
+    /// Имя автора
+    #[arg(long, value_name = "TEXT")]
+    pub author_name: Option<String>,
+    /// E-mail автора
+    #[arg(long, value_name = "EMAIL")]
+    pub author_email: Option<String>,
+    /// Статус модерации: published, waiting (по умолчанию), banned, held
+    #[arg(long, value_name = "STATE")]
+    pub state: Option<String>,
+    /// Атрибуты JSON-объектом из файла (`-` — из stdin); флаги перекрывают его ключи
+    #[arg(long, value_name = "FILE|-")]
+    pub data: Option<PathBuf>,
+    #[command(flatten)]
+    pub dry: DryRun,
 }
 
 #[derive(Debug, Subcommand)]

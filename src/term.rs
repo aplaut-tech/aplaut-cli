@@ -165,6 +165,17 @@ impl Write for SharedBuf {
     }
 }
 
+/// Значение для копирования в шелл: в кавычках, если в нём есть что-то кроме безопасных символов.
+pub fn shell_word(s: &str) -> String {
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || "_:.,@%+=/-".contains(c))
+    {
+        s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

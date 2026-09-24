@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod profile;
 pub mod records;
+pub mod reviews;
 
 use std::io::{self, IsTerminal};
 use std::path::Path;
@@ -13,7 +14,7 @@ use serde::Serialize;
 
 use crate::api_error::ErrorContext;
 use crate::auth::{EnvSnapshot, StdinSource, TokenFlags, DEFAULT_BASE_URL};
-use crate::cli::{AuthVerb, Command, GlobalArgs, ProfileVerb, RecordsVerb};
+use crate::cli::{AuthVerb, Command, GlobalArgs, ProfileVerb, RecordsVerb, ReviewsVerb};
 use crate::clock::Clock;
 use crate::config::{self, Paths};
 use crate::error::CliError;
@@ -99,7 +100,7 @@ pub fn can_prompt(stdin_tty: bool, no_input: bool, json: bool) -> bool {
 
 pub fn dispatch(command: Command, ctx: &Ctx) -> Result<Outcome, CliError> {
     match command {
-        Command::Reviews { verb } => records::run(&resources::REVIEWS, verb, ctx),
+        Command::Reviews { verb } => reviews::run(verb, ctx),
         Command::Products { verb } => records::run(&resources::PRODUCTS, verb, ctx),
         Command::Questions { verb } => records::run(&resources::QUESTIONS, verb, ctx),
         Command::Auth { verb } => auth::run(verb, ctx),
@@ -117,6 +118,9 @@ pub fn is_dry_run(command: &Command) -> bool {
         Command::Auth {
             verb: AuthVerb::Login(dry) | AuthVerb::Logout(dry),
         } => dry.dry_run,
+        Command::Reviews {
+            verb: ReviewsVerb::Create(args),
+        } => args.dry.dry_run,
         _ => false,
     }
 }
@@ -124,7 +128,7 @@ pub fn is_dry_run(command: &Command) -> bool {
 /// Имя для конверта ошибки: `reviews.scroll`, `auth.login`.
 pub fn command_name(command: &Command) -> String {
     let (resource, verb) = match command {
-        Command::Reviews { verb } => ("reviews", records_verb(verb)),
+        Command::Reviews { verb } => ("reviews", reviews_verb(verb)),
         Command::Products { verb } => ("products", records_verb(verb)),
         Command::Questions { verb } => ("questions", records_verb(verb)),
         Command::Auth { verb } => (
@@ -146,6 +150,13 @@ pub fn command_name(command: &Command) -> String {
         ),
     };
     format!("{resource}.{verb}")
+}
+
+fn reviews_verb(verb: &ReviewsVerb) -> &'static str {
+    match verb {
+        ReviewsVerb::Records(verb) => records_verb(verb),
+        ReviewsVerb::Create(_) => "create",
+    }
 }
 
 fn records_verb(verb: &RecordsVerb) -> &'static str {

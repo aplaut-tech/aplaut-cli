@@ -180,7 +180,7 @@ aplaut products get 444772 --format csv --fields id,name
 | `--json` | итог и ошибка — одной строкой JSON; предупреждения — в `warnings`, а не текстом; включает `--no-input` |
 | `--no-input` | ничего не спрашивать: вместо вопроса — ошибка с подсказкой, какой флаг передать |
 | `--yes` (`-y`) | подтвердить удаление без вопроса (`profile delete`) |
-| `--dry-run` (`-n`) | у `profile set/delete` и `auth login/logout`: всё проверить и вернуть план в `result`, ничего не меняя |
+| `--dry-run` (`-n`) | у `profile set/delete`, `auth login/logout`, `reviews create/comment`: всё проверить и вернуть план в `result`, ничего не меняя |
 
 ```json
 {"ok":true,"command":"profile.set","cli_version":"0.1.0","dry_run":false,
@@ -248,12 +248,13 @@ aplaut products get 444772 --format csv --fields id,name
 | `invalid_cursor` | 1 | сервер не принял курсор |
 | `cursor_mismatch` | 1 | курсор выдан для другого запроса |
 | `server_error` | 1 | 5xx; у 503 — `retry_after` |
+| `request_outcome_unknown` | 1 | запись (POST) оборвалась после отправки — таймаут, обрыв, 5xx кроме 503: неизвестно, выполнена ли она; CLI не повторяет, в `hint` — как проверить |
 | `unexpected_redirect` | 1 | 3xx: редиректы не выполняются |
 | `http_<status>` | 1 | прочие ответы HTTP без своего кода, например `http_409` |
 | `timeout` | 1 | нет ответа за `--timeout` после повторов |
 | `network_error` | 1 | сеть или TLS после повторов |
 | `response_too_large` | 1 | ответ больше допустимого |
-| `bad_response` | 1 | ответ не по контракту: не JSON или `has_more` без курсора |
+| `bad_response` | 1 | ответ не по контракту: не JSON, `has_more` без курсора, 2xx записи без `data` (запись, скорее всего, создана — `retryable: false`) |
 | `scroll_interrupted` | 1 | продолжение оборвалось, неизвестно, обработал ли его сервер; в `hint` — как продолжить |
 | `no_progress` | 1 | страницы без новых записей: обход зациклился |
 | `config_invalid` | 1 | `config.toml` не разбирается или в нём неизвестные ключи |
