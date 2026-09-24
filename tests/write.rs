@@ -366,6 +366,29 @@ fn input_errors_are_caught_before_the_network() {
     }
 }
 
+/// Стейджинг, 2026-09-24: схема требует body, а сервер — rating и любой из текстов.
+#[test]
+fn any_of_the_texts_is_enough() {
+    let server = MockServer::start(vec![created("reviews", "r1"), created("reviews", "r2")]);
+    for text in ["--pros", "--cons"] {
+        let out = run(
+            &server,
+            &["reviews", "create", "--rating", "4", text, "Тест", "--json"],
+            "",
+        );
+        envelope(&out);
+    }
+    assert_eq!(server.requests().len(), 2);
+    let none = MockServer::start(vec![]);
+    let out = run(&none, &["reviews", "create", "--rating", "4"], "");
+    local_error(&none, &out, "missing_attribute", "body");
+    let hint = out.error_json()["error"]["hint"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(hint.contains("--pros") && hint.contains("--cons"), "{hint}");
+}
+
 #[test]
 fn failed_plan_is_marked_dry_run() {
     let server = MockServer::start(vec![]);

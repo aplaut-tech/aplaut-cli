@@ -133,18 +133,19 @@ fn flag_value(attribute: Option<&AttributeSpec>, raw: &str) -> Value {
 }
 
 /// Проверка до сети (§3): неизвестные атрибуты, типы, enum, границы, date-time, обязательные.
-/// Глубже (поля объектов в массивах) проверяет сервер: 422 → `validation_failed`.
+/// Глубже (поля объектов в массивах) проверяет сервер: 422 → `validation_failed`. `required` —
+/// обычно `spec.required`; команда сужает его, если сервер строже схемы не требует (§15).
 pub fn validate(
     spec: &WriteSpec,
     attributes: &Map<String, Value>,
+    required: &[&str],
     flags: &[Flag],
 ) -> Result<(), CliError> {
     for (name, value) in attributes {
         let attribute = spec.attribute(name).ok_or_else(|| unknown(spec, name))?;
         check(attribute, value).map_err(|problem| invalid(attribute, problem))?;
     }
-    match spec
-        .required
+    match required
         .iter()
         .find(|name| !attributes.contains_key(**name))
     {
@@ -365,7 +366,7 @@ mod tests {
     const REVIEW_FLAGS: [Flag<'static>; 2] = [("rating", None), ("body", None)];
 
     fn check_review(value: Value) -> Result<(), CliError> {
-        validate(reviews(), &object(value), &REVIEW_FLAGS)
+        validate(reviews(), &object(value), reviews().required, &REVIEW_FLAGS)
     }
 
     #[test]
@@ -483,7 +484,13 @@ mod tests {
             ("missing_attribute", Some("body"), Exit::Usage)
         );
         assert!(err.hint.unwrap().contains("--body"));
-        let err = validate(reviews(), &object(json!({"body": "ok"})), &[]).unwrap_err();
+        let err = validate(
+            reviews(),
+            &object(json!({"body": "ok"})),
+            reviews().required,
+            &[],
+        )
+        .unwrap_err();
         assert_eq!(err.field.as_deref(), Some("rating"));
         assert!(
             !err.hint.unwrap().contains("--rating"),

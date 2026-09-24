@@ -141,8 +141,10 @@ const REVIEWS_CREATE_AFTER_LONG_HELP: &str = "\
     | aplaut reviews create --data - --json
 
 Атрибуты — из схемы тела POST /reviews в спеке; флаги перекрывают одноимённые ключи --data.
-Через --data передаётся всё, для чего нет флага: photos, tags, rating_details, dimensions,
-custom_attributes, даты, hide_my_data и т. д. Без product_id отзыв создаётся о компании.
+Обязательны rating и хотя бы одно из body, pros, cons (так проверяет сервер; схема спеки
+требует body). Через --data передаётся всё, для чего нет флага: photos, tags, rating_details,
+dimensions, custom_attributes, даты, hide_my_data и т. д. Недоступные URL в photos сервер молча
+отбрасывает. Без product_id отзыв создаётся о компании.
 С -n (--dry-run) токен проверяется, но запросов нет.
 
 Повторы: CLI повторяет запрос сам, только если сервер его точно не обработал (429, 503,
@@ -433,7 +435,7 @@ pub struct CommentArgs {
     /// E-mail автора
     #[arg(long, value_name = "EMAIL")]
     pub author_email: Option<String>,
-    /// Статус модерации: published, waiting, banned
+    /// Статус модерации: published, waiting (по умолчанию), banned
     #[arg(long, value_name = "STATE")]
     pub state: Option<String>,
     /// Внутренний id родительского комментария — ответ на комментарий

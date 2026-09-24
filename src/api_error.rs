@@ -119,6 +119,10 @@ pub fn parse_www_authenticate(header: &str) -> (Option<String>, Option<String>) 
     (error, description)
 }
 
+/// Ключи `details`, которые описывают ошибку целиком, а не параметр: `model` — у 422 записи
+/// (стейджинг, 2026-09-24: `{"rating": […], "model": "Validation of Review failed."}`).
+const SUMMARY_KEYS: [&str; 2] = ["message", "model"];
+
 #[derive(Debug, Default)]
 struct ParsedBody {
     title: Option<String>,
@@ -159,11 +163,12 @@ impl ParsedBody {
                         Value::String(s) => vec![s.clone()],
                         _ => Vec::new(),
                     };
-                    if key != "message" && parsed.field.is_none() {
+                    let summary = SUMMARY_KEYS.contains(&key.as_str());
+                    if !summary && parsed.field.is_none() {
                         parsed.field = Some(key.clone());
                     }
                     for text in texts {
-                        parsed.messages.push(if key == "message" {
+                        parsed.messages.push(if summary {
                             text
                         } else {
                             format!("{key}: {text}")
@@ -298,6 +303,22 @@ mod tests {
             .contains("https://aplaut.com/docs/api-references/platform/"));
         assert_eq!(err.request_id.as_deref(), Some("req-42"));
         assert!(!err.retryable);
+    }
+
+    /// Стейджинг, 2026-09-24: у 422 записи рядом с атрибутом — сводный ключ `model`.
+    #[test]
+    fn observed_write_422_names_the_attribute_not_the_model() {
+        let body = r#"{"errors":{"status":422,"title":"Validation error","details":{"rating":["не является числом"],"model":"Validation of Review failed."},"readme":{"link":"https://aplaut.com/docs/api-references/platform/"}}}"#;
+        let err = from_response(422, &headers(), body.as_bytes(), &ctx());
+        assert_eq!(
+            (err.code.as_str(), err.field.as_deref()),
+            ("validation_failed", Some("rating"))
+        );
+        assert!(
+            err.message.contains("rating: не является числом"),
+            "{}",
+            err.message
+        );
     }
 
     #[test]

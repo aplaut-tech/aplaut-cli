@@ -25,10 +25,21 @@ pub fn run(verb: ReviewsVerb, ctx: &Ctx) -> Result<Outcome, CliError> {
     }
 }
 
+/// Сервер принимает отзыв с любым из текстов (стейджинг, 2026-09-24; §15 дизайна среза 1):
+/// схема требует body, описание — хотя бы одно из pros, cons, body.
+const REVIEW_TEXT: [&str; 3] = ["body", "pros", "cons"];
+
 fn create(args: &CreateReviewArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
     let (spec, path) = write_operation(Verb::Create)?;
     let flags = create_flags(args);
-    let attributes = prepare(spec, args.data.as_deref(), &flags, ctx)?;
+    let required: Vec<&str> = spec
+        .required
+        .iter()
+        .copied()
+        .filter(|name| !REVIEW_TEXT.contains(name))
+        .collect();
+    let attributes = prepare(spec, &required, args.data.as_deref(), &flags, ctx)?;
+    require_review_text(&attributes)?;
     let verify = match attributes.get("external_id").and_then(Value::as_str) {
         Some(id) => format!(
             "проверьте, создан ли отзыв: aplaut reviews get {}",
@@ -40,6 +51,21 @@ fn create(args: &CreateReviewArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
     execute(request, args.dry.dry_run, &verify, ctx, |created| {
         format!("Отзыв создан: id {}", id_of(created))
     })
+}
+
+fn require_review_text(attributes: &Map<String, Value>) -> Result<(), CliError> {
+    if REVIEW_TEXT
+        .iter()
+        .any(|name| attributes.contains_key(*name))
+    {
+        return Ok(());
+    }
+    Err(CliError::usage(
+        "missing_attribute",
+        "у отзыва нет текста: нужно хотя бы одно из body, pros, cons",
+    )
+    .with_field("body")
+    .with_hint("передайте --body, --pros или --cons (или ключ в --data)"))
 }
 
 /// Флаги `create` → атрибуты схемы POST /reviews (§3).
@@ -61,7 +87,7 @@ fn comment(args: &CommentArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
     check_id(&args.review_id, "review_id")?;
     let (spec, template) = write_operation(Verb::Comment)?;
     let flags = comment_flags(args);
-    let attributes = prepare(spec, args.data.as_deref(), &flags, ctx)?;
+    let attributes = prepare(spec, spec.required, args.data.as_deref(), &flags, ctx)?;
     let review = &args.review_id;
     let lookup = format!(
         "aplaut reviews get {} --include comments --format jsonl",
@@ -108,6 +134,7 @@ fn write_operation(verb: Verb) -> Result<(&'static WriteSpec, String), CliError>
 /// Всё локальное — до сети: stdin, `--data`, флаги, проверка по схеме (§3).
 fn prepare(
     spec: &WriteSpec,
+    required: &[&str],
     data: Option<&Path>,
     flags: &[Flag],
     ctx: &Ctx,
@@ -131,7 +158,7 @@ fn prepare(
         None => None,
     };
     let attributes = write::attributes(spec, data, flags);
-    write::validate(spec, &attributes, flags)?;
+    write::validate(spec, &attributes, required, flags)?;
     Ok(attributes)
 }
 

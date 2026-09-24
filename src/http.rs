@@ -15,8 +15,8 @@ use crate::term::Reporter;
 use crate::time;
 
 const ACCEPT: &str = "application/vnd.api+json";
-/// Тело записи — по спеке: у `requestBody` операций записи `application/json`
-/// (вступление спеки просит `application/vnd.api+json`; см. §15 дизайна среза 1).
+/// Тело записи — по спеке: у `requestBody` операций записи `application/json`. Вступление спеки
+/// просит `application/vnd.api+json`; сервер принимает оба (стейджинг, 2026-09-24; §15 дизайна среза 1).
 const CONTENT_TYPE: &str = "application/json";
 /// Страница scroll на 100 записей — сотни килобайт; 64 МБ — защита от бесконечного тела.
 const MAX_BODY_BYTES: u64 = 64 * 1024 * 1024;
