@@ -6,3 +6,7 @@
 
 # Внутренние дизайн-доки и планы — не публикуются
 /docs/superpowers/
+
+# Рабочие файлы плагинов Claude Code
+/.superpowers/
+/.remember/
