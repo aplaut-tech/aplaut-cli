@@ -309,7 +309,7 @@ fn write_spec(out: &mut String, spec: &Yaml, op: &WriteOp) {
         )
         .unwrap();
     }
-    writeln!(out, "    ] }},").unwrap();
+    writeln!(out, "    ], nullable: {} }},", op.partial).unwrap();
 }
 
 fn attr_type(node: &Yaml, what: &str) -> &'static str {

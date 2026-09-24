@@ -65,6 +65,13 @@ fn update(args: &UpdateProductArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
     let (spec, template) = write_operation(&resources::PRODUCTS, Verb::Update)?;
     let flags = product_flags(&args.fields, args.external_id.as_deref());
     let attributes = prepare(spec, spec.required, args.data.as_deref(), &flags, ctx)?;
+    if attributes.get("external_id").is_some_and(Value::is_null) {
+        return Err(CliError::usage(
+            "invalid_attribute",
+            "атрибут «external_id»: очистить нельзя — без него товар не найти ни get, ни update",
+        )
+        .with_field("external_id"));
+    }
     if attributes.is_empty() {
         // Пустой PUT ничего не меняет, но сервер сбрасывает категорию (стейджинг, 2026-09-24; P5).
         return Err(CliError::usage(
@@ -104,15 +111,24 @@ fn update(args: &UpdateProductArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
     })
 }
 
-/// 422 `external_id is already taken`: товар уже есть — его меняет `update`.
+/// 422 `external_id is already taken`: товар уже есть — его меняет `update`. Другие ошибки
+/// external_id (например, пустой) — не про существующий товар.
 fn already_taken(err: CliError, external_id: &str) -> CliError {
-    if err.code != "validation_failed" || err.field.as_deref() != Some("external_id") {
+    let taken = err.code == "validation_failed"
+        && err.field.as_deref() == Some("external_id")
+        && err.message.contains("is already taken");
+    if !taken {
         return err;
     }
-    let hint = format!(
-        "товар с external_id {external_id} уже есть — изменить его: aplaut products update {} …",
-        shell_word(external_id)
-    );
+    let hint = match check_id(external_id, "external_id") {
+        Ok(()) => format!(
+            "товар с external_id {external_id} уже есть — изменить его: aplaut products update {} …",
+            shell_word(external_id)
+        ),
+        Err(_) => format!(
+            "товар с external_id {external_id} уже есть; такой id update не адресует — измените товар по внутреннему id (поле id в выгрузке scroll)"
+        ),
+    };
     err.with_hint(hint)
 }
 

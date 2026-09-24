@@ -147,6 +147,9 @@ pub fn validate(
 ) -> Result<(), CliError> {
     for (name, value) in attributes {
         let attribute = spec.attribute(name).ok_or_else(|| unknown(spec, name))?;
+        if value.is_null() && spec.nullable {
+            continue;
+        }
         check(attribute, value).map_err(|problem| invalid(attribute, problem))?;
     }
     match required

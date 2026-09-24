@@ -279,3 +279,79 @@ fn update_of_a_missing_product_is_exit_5_and_dry_run_sends_nothing() {
     assert_eq!(out.code, 5, "{}", out.stderr);
     assert_eq!(out.error_json()["error"]["code"], "not_found");
 }
+
+/// null очищает атрибут (стейджинг, 2026-09-24; §15 дизайна среза 1, строка 24) — справка это обещает.
+#[test]
+fn update_can_clear_an_attribute_with_null_but_create_cannot() {
+    let server = MockServer::start(vec![product(200, "p1")]);
+    let body = r#"{"description": null, "custom_attributes": {"old": null}}"#;
+    envelope(&run(
+        &server,
+        &["products", "update", "60757", "--data", "-", "--json"],
+        body,
+    ));
+    assert_eq!(
+        server.requests()[0].json()["data"]["attributes"],
+        json!({"description": null, "custom_attributes": {"old": null}})
+    );
+    let none = MockServer::start(vec![]);
+    let out = run(
+        &none,
+        &create_with(&["--data", "-"]),
+        r#"{"description": null}"#,
+    );
+    local_error(&none, &out, "invalid_attribute", "description");
+}
+
+/// Без external_id товар не найти ни get, ни update.
+#[test]
+fn update_cannot_clear_the_external_id() {
+    let server = MockServer::start(vec![]);
+    let out = run(
+        &server,
+        &["products", "update", "60757", "--data", "-"],
+        r#"{"external_id": null}"#,
+    );
+    local_error(&server, &out, "invalid_attribute", "external_id");
+}
+
+/// «Уже есть» — только для is already taken, и команду — только для адресуемого id.
+#[test]
+fn only_a_taken_external_id_points_to_update() {
+    let blank = MockServer::start(vec![Reply::json(
+        422,
+        r#"{"errors":{"status":422,"title":"Validation error","details":{"external_id":["не может быть пустым"],"model":"Validation of Product failed."}}}"#,
+    )]);
+    let out = run(&blank, &create_with(&[]), "");
+    let hint = out.error_json()["error"]["hint"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(!hint.contains("products update"), "{hint}");
+    let taken = MockServer::start(vec![Reply::json(
+        422,
+        r#"{"errors":{"status":422,"title":"Validation error","details":{"external_id":["is already taken"]}}}"#,
+    )]);
+    let out = run(
+        &taken,
+        &[
+            "products",
+            "create",
+            "--external-id",
+            "sku.1",
+            "--name",
+            "x",
+            "--url",
+            "https://x",
+        ],
+        "",
+    );
+    let hint = out.error_json()["error"]["hint"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        !hint.contains("products update sku.1") && hint.contains("уже есть"),
+        "{hint}"
+    );
+}

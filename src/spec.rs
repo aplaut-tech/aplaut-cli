@@ -39,6 +39,8 @@ pub struct WriteSpec {
     pub resource_type: &'static str,
     pub required: &'static [&'static str],
     pub attributes: &'static [AttributeSpec],
+    /// Частичное обновление: `null` очищает атрибут (стейджинг, 2026-09-24; спека products-write §6).
+    pub nullable: bool,
 }
 
 impl WriteSpec {
@@ -244,6 +246,7 @@ mod tests {
             (update.resource_type, update.required),
             ("products", &[][..])
         );
+        assert!(update.nullable && !create.nullable);
         assert!(update.attribute("category_name").is_some());
         assert!(update.attribute("brand_name").is_some());
         assert!(
