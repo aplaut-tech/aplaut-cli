@@ -40,22 +40,34 @@ pub const OUTCOME_UNKNOWN: &str = "request_outcome_unknown";
 /// тогда, когда сервер его точно не обработал — иначе страница молча пропадёт. Так же
 /// повторяется запись (POST): идемпотентности у API нет.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Replay {
+pub enum Replay {
     Safe,
     OnlyIfUnprocessed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Method {
+pub enum Method {
     Get,
     Post,
+    Put,
 }
 
 impl Method {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Method::Get => "GET",
             Method::Post => "POST",
+            Method::Put => "PUT",
+        }
+    }
+
+    /// Метод операции из спеки: `GET`, `POST`, `PUT`.
+    pub fn from_name(name: &str) -> Option<Method> {
+        match name {
+            "GET" => Some(Method::Get),
+            "POST" => Some(Method::Post),
+            "PUT" => Some(Method::Put),
+            _ => None,
         }
     }
 }
@@ -176,14 +188,26 @@ impl ApiClient {
     /// Запись не идемпотентна (спека reviews-write W7): повтор — только после 429, 503 и
     /// ошибок соединения, до которых запрос не ушёл; иначе — ошибка `OUTCOME_UNKNOWN`.
     pub fn post(&mut self, path: &str, body: &serde_json::Value) -> Result<ApiResponse, CliError> {
+        self.write(Method::Post, path, body, Replay::OnlyIfUnprocessed)
+    }
+
+    /// Запись с телом JSON. POST не идемпотентен — вызывающий передаёт `OnlyIfUnprocessed`; PUT
+    /// повторяется как GET, если повтор адресует тот же объект (спека products-write P7).
+    pub fn write(
+        &mut self,
+        method: Method,
+        path: &str,
+        body: &serde_json::Value,
+        replay: Replay,
+    ) -> Result<ApiResponse, CliError> {
         let bytes = serde_json::to_vec(body).expect("JSON сериализуется");
         let call = Call {
-            method: Method::Post,
+            method,
             path,
             query: &[],
             body: Some(&bytes),
         };
-        self.request(call, Pace::Default, Replay::OnlyIfUnprocessed)
+        self.request(call, Pace::Default, replay)
     }
 
     fn request(
@@ -287,10 +311,15 @@ impl ApiClient {
     fn send(&self, url: &str, call: &Call) -> Result<RawResponse, ureq::Error> {
         let mut response = match call.method {
             Method::Get => self.prepare(self.agent.get(url), call.query).call()?,
-            Method::Post => self
-                .prepare(self.agent.post(url), call.query)
-                .header("Content-Type", CONTENT_TYPE)
-                .send(call.body.unwrap_or_default())?,
+            Method::Post | Method::Put => {
+                let request = match call.method {
+                    Method::Put => self.agent.put(url),
+                    _ => self.agent.post(url),
+                };
+                self.prepare(request, call.query)
+                    .header("Content-Type", CONTENT_TYPE)
+                    .send(call.body.unwrap_or_default())?
+            }
         };
         let status = response.status().as_u16();
         let headers = {

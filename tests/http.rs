@@ -6,7 +6,7 @@ use std::time::Duration;
 use aplaut_cli::api_error::ErrorContext;
 use aplaut_cli::clock::FakeClock;
 use aplaut_cli::error::Exit;
-use aplaut_cli::http::{ApiClient, HttpSettings, Pace};
+use aplaut_cli::http::{ApiClient, HttpSettings, Method, Pace, Replay};
 use aplaut_cli::secret::Secret;
 use aplaut_cli::term::{Reporter, SharedBuf};
 use support::{MockServer, Reply};
@@ -461,4 +461,39 @@ fn refused_connection_is_never_sent_so_it_is_retried() {
         .get_continuation("/scroll/reviews", &[("cursor", "c1")])
         .unwrap_err();
     assert_eq!(err.code, "network_error", "{err:?}");
+}
+
+/// PUT идемпотентен: повтор того же тела даёт то же состояние (спека products-write P7).
+#[test]
+fn put_sends_the_body_and_is_replayed_like_get() {
+    let server = MockServer::start(vec![
+        Reply::text(500, "oops"),
+        Reply::json(200, r#"{"data":{"id":"p1","type":"products"}}"#),
+    ]);
+    let (mut api, _, _) = client(&server, 6);
+    let body = serde_json::json!({"data": {"type": "products", "attributes": {"price": 20}}});
+    api.write(Method::Put, "/products/p1", &body, Replay::Safe)
+        .unwrap();
+    let requests = server.requests();
+    assert_eq!(requests.len(), 2, "повтор после 500");
+    assert!(requests
+        .iter()
+        .all(|r| r.method == "PUT" && r.path == "/v4/products/p1" && r.json() == body));
+    assert_eq!(requests[0].header("content-type"), Some("application/json"));
+}
+
+#[test]
+fn put_that_may_address_another_object_is_not_replayed() {
+    let server = MockServer::start(vec![Reply::text(500, "oops"), Reply::json(200, "{}")]);
+    let (mut api, _, _) = client(&server, 6);
+    let err = api
+        .write(
+            Method::Put,
+            "/products/old",
+            &review_doc(),
+            Replay::OnlyIfUnprocessed,
+        )
+        .unwrap_err();
+    assert_eq!(err.code, aplaut_cli::http::OUTCOME_UNKNOWN);
+    assert_eq!(server.requests().len(), 1);
 }
