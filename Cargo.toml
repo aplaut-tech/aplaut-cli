@@ -22,14 +22,17 @@ path = "src/main.rs"
 
 [dependencies]
 # Самообновление (спека self-update): установщик релиза через axoupdater. reqwest — тот же крейт,
-# что у axoasset, ради клиента с таймаутом; tokio — однопоточный рантайм для его async API.
+# что у axoasset, ради клиента с таймаутом; tokio — однопоточный рантайм для его async API
+# и для MCP-сервера (спека mcp-server M4): stdio и дочерние процессы.
 axoupdater = { version = "0.10", default-features = false, features = ["github_releases"] }
 clap = { version = "4.6", features = ["derive"] }
 reqwest = { version = "0.13", default-features = false }
+# MCP-сервер `aplaut mcp` (спека mcp-server M2): официальный SDK, без макросов и HTTP-транспорта.
+rmcp = { version = "3.4", default-features = false, features = ["server", "transport-io"] }
 rpassword = "7.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", default-features = false, features = ["rt", "net", "time"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "io-std", "io-util", "process"] }
 toml = "1.1"
 ureq = "3.4"
 

@@ -105,6 +105,7 @@
 | `no_progress` | 1 | страницы без новых записей: обход зациклился |
 | `update_unavailable` | 1 | `self update`: aplaut поставлен не установщиком (нет receipt или он от другого бинаря) или на GitHub нет релиза с установщиком; ничего не изменено |
 | `update_failed` | 1 | `self update`: установщик новой версии завершился с ошибкой (подробности — выше, в его выводе) или GitHub ответил непонятно |
+| `mcp_handshake_failed` | 1 | `aplaut mcp`: клиент закрыл соединение или прислал не MCP до `initialize` |
 | `config_invalid` | 1 | `config.toml` не разбирается или в нём неизвестные ключи |
 | `credentials_invalid` | 1 | `credentials` не разбирается |
 | `config_changed_during_edit` | 1 | `config.toml` изменился, пока был открыт редактор; правки — в копии |

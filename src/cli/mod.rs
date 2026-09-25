@@ -116,6 +116,9 @@ pub enum Command {
         #[command(subcommand)]
         verb: SelfVerb,
     },
+    /// MCP-сервер для агентов: команды aplaut — инструментами (stdio)
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = MCP_AFTER_LONG_HELP)]
+    Mcp(McpArgs),
 }
 
 /// У товаров, кроме общих глаголов чтения, есть запись (спека products-write P1).
@@ -381,6 +384,14 @@ pub enum SelfVerb {
     /// Поставить последний релиз тем же установщиком, которым поставлен этот aplaut
     #[command(after_help = LEAF_AFTER_HELP, after_long_help = SELF_UPDATE_AFTER_LONG_HELP)]
     Update(DryRun),
+}
+
+/// `aplaut mcp` (спека mcp-server §1): флаги сервера; глобальные флаги он передаёт каждому вызову.
+#[derive(Debug, Clone, Args)]
+pub struct McpArgs {
+    /// Открыть агенту запись: reviews_create, reviews_comment, products_create, products_update
+    #[arg(long)]
+    pub allow_writes: bool,
 }
 
 /// `--dry-run` у команд, которые что-то меняют (спека agent mode §5).

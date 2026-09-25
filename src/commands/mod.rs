@@ -1,6 +1,7 @@
 //! Клей между деревом clap и алгоритмами: сборка зависимостей и сообщения пользователю.
 
 pub mod auth;
+pub mod mcp;
 pub mod products;
 pub mod profile;
 pub mod records;
@@ -112,6 +113,7 @@ pub fn dispatch(command: Command, ctx: &Ctx) -> Result<Outcome, CliError> {
         Command::Auth { verb } => auth::run(verb, ctx),
         Command::Profile { verb } => profile::run(verb, ctx),
         Command::SelfCmd { verb } => self_update::run(verb, ctx),
+        Command::Mcp(args) => mcp::run(&args, ctx),
     }
 }
 
@@ -147,6 +149,7 @@ pub fn is_dry_run(command: &Command) -> bool {
 /// Имя для конверта ошибки: `reviews.scroll`, `auth.login`.
 pub fn command_name(command: &Command) -> String {
     let (resource, verb) = match command {
+        Command::Mcp(_) => return "mcp".to_string(),
         Command::Reviews { verb } => ("reviews", reviews_verb(verb)),
         Command::Products { verb } => ("products", products_verb(verb)),
         Command::Questions { verb } => ("questions", records_verb(verb)),
@@ -229,16 +232,7 @@ pub fn connect(ctx: &Ctx) -> Result<ApiClient, CliError> {
             ),
         );
     }
-    let mut load_profile = || -> Result<_, CliError> {
-        let config = config::load_config(&Paths::resolve(&ctx.env)?)?;
-        Ok(config.profiles.get(&profile).cloned())
-    };
-    let base_url = crate::auth::resolve_base_url(
-        ctx.global.base_url.as_deref(),
-        &ctx.env,
-        profile_flag,
-        &mut load_profile,
-    )?;
+    let base_url = base_url_for(ctx, &profile)?;
     if base_url != DEFAULT_BASE_URL {
         ctx.reporter.debug(&format!("base URL: {base_url}"));
     }
@@ -260,6 +254,21 @@ pub fn connect(ctx: &Ctx) -> Result<ApiClient, CliError> {
         ctx.clock.clone(),
         ctx.reporter.clone(),
     ))
+}
+
+/// Base URL — как у `connect`: `--base-url`, `APLAUT_BASE_URL` (без явного `--profile`), профиль,
+/// по умолчанию. Нужен и серверу MCP — для `instructions`.
+pub fn base_url_for(ctx: &Ctx, profile: &str) -> Result<String, CliError> {
+    let mut load_profile = || -> Result<_, CliError> {
+        let config = config::load_config(&Paths::resolve(&ctx.env)?)?;
+        Ok(config.profiles.get(profile).cloned())
+    };
+    crate::auth::resolve_base_url(
+        ctx.global.base_url.as_deref(),
+        &ctx.env,
+        ctx.global.profile.is_some(),
+        &mut load_profile,
+    )
 }
 
 /// Идентификатор уходит сегментом пути. Пустой (незаданная переменная шелла) превратил бы
