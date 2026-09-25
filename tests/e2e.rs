@@ -412,8 +412,9 @@ fn consumer_write_round_trip() {
     assert_eq!(out.code, 2, "{}", out.stderr);
 }
 
-/// Круг заказов: создать со строкой → get с include=consumer (заказ создаёт клиента — удалить и
-/// его) → сменить имя → get: имя новое, строки прежние → удалить заказ и клиента.
+/// Круг заказов: создать со строкой (заказ создаёт клиента — гвард на его удаление объявлен до
+/// создания заказа) → get с include=consumer проверяет include → сменить имя → get: имя новое,
+/// строки прежние → удалить клиента (гвард), потом заказ.
 #[test]
 #[ignore]
 fn order_write_round_trip() {
@@ -424,6 +425,9 @@ fn order_write_round_trip() {
     let number = format!("aplaut-cli-test-{stamp}-o");
     let line_product = format!("aplaut-cli-test-{stamp}-p");
     let _order = Cleanup(format!("orders/{number}"));
+    // Объявлен до create: если тест упадёт посреди круга, клиент заказа всё равно будет найден и
+    // удалён при drop (стейджинг, 2026-09-25 — заказ с новым e-mail/телефоном создаёт клиента).
+    let _order_consumer = OrderConsumerCleanup(number.clone());
     let lines = serde_json::json!({"order_lines": [
         {"product_id": line_product, "name": "aplaut-cli test", "price": 1}
     ]})
@@ -446,11 +450,10 @@ fn order_write_round_trip() {
         &lines,
     ));
     let raw = json_line(&run(&["orders", "get", &number, "--include", "consumer"]));
-    let consumer = raw["data"]["relationships"]["consumer"]["data"]["id"]
-        .as_str()
-        .expect("клиент заказа")
-        .to_string();
-    let _consumer = Cleanup(format!("consumers/{consumer}"));
+    assert!(
+        raw["data"]["relationships"]["consumer"]["data"]["id"].is_string(),
+        "{raw}"
+    );
     json_line(&run(&[
         "orders",
         "update",
@@ -484,23 +487,64 @@ fn unix_seconds() -> u64 {
         .as_secs()
 }
 
-/// Удаляет тестовый объект по пути от base URL (`reviews/<external_id>`). Токен — из окружения
-/// теста, не из argv.
+/// Заголовки авторизации и Accept — общие для всех прямых вызовов API в этом файле (в обход CLI,
+/// из guard'ов удаления). Токен — из окружения теста, не из argv.
+fn authorized<B>(request: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
+    request
+        .header("Authorization", format!("Bearer {}", token()))
+        .header("Accept", "application/vnd.api+json")
+}
+
+/// Удаляет тестовый объект по пути от base URL (`reviews/<external_id>`).
 struct Cleanup(String);
 
 impl Drop for Cleanup {
     fn drop(&mut self) {
         let url = format!("{}/{}", base_url(), self.0);
-        let result = ureq::delete(&url)
-            .header("Authorization", format!("Bearer {}", token()))
-            .header("Accept", "application/vnd.api+json")
-            .call();
+        let result = authorized(ureq::delete(&url)).call();
         match result {
             Ok(_) | Err(ureq::Error::StatusCode(404)) => {}
             Err(err) => eprintln!(
                 "НЕ УДАЛЁН тестовый объект {}: {err} — удалите вручную",
                 self.0
             ),
+        }
+    }
+}
+
+/// Удаляет клиента, которого создал заказ (стейджинг, 2026-09-25): находит его через
+/// GET /orders/{number}?include=consumer при drop — guard объявлен до создания заказа, поэтому
+/// клиент не утечёт, даже если тест упадёт посреди круга.
+struct OrderConsumerCleanup(String);
+
+impl Drop for OrderConsumerCleanup {
+    fn drop(&mut self) {
+        let number = &self.0;
+        let leaked = |err: &dyn std::fmt::Display| {
+            eprintln!("НЕ УДАЛЁН клиент заказа {number}: {err} — удалите вручную");
+        };
+        let url = format!("{}/orders/{number}?include=consumer", base_url());
+        let mut response = match authorized(ureq::get(&url)).call() {
+            Ok(response) => response,
+            Err(ureq::Error::StatusCode(404)) => return, // заказ не создался — удалять нечего
+            Err(err) => return leaked(&err),
+        };
+        let body = match response.body_mut().read_to_string() {
+            Ok(body) => body,
+            Err(err) => return leaked(&err),
+        };
+        let parsed: serde_json::Value = match serde_json::from_str(&body) {
+            Ok(parsed) => parsed,
+            Err(err) => return leaked(&err),
+        };
+        let Some(consumer) = parsed["data"]["relationships"]["consumer"]["data"]["id"].as_str()
+        else {
+            return;
+        };
+        let url = format!("{}/consumers/{consumer}", base_url());
+        match authorized(ureq::delete(&url)).call() {
+            Ok(_) | Err(ureq::Error::StatusCode(404)) => {}
+            Err(err) => leaked(&err),
         }
     }
 }
