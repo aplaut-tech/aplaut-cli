@@ -19,7 +19,7 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/aplaut-tech/aplaut-cli/
 Тот же скрипт из нужного релиза:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/aplaut-tech/aplaut-cli/releases/download/v0.3.0/aplaut-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/aplaut-tech/aplaut-cli/releases/download/v0.4.0/aplaut-cli-installer.sh | sh
 ```
 
 ### Серверы, контейнеры и CI
