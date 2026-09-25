@@ -431,7 +431,9 @@ mod tests {
                 "products_create",
                 "products_update",
                 "questions_scroll",
-                "questions_get"
+                "questions_get",
+                "questions_create",
+                "questions_update"
             ]
         );
         assert!(enabled(false).iter().all(|t| !t.writes()));

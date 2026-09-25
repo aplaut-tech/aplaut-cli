@@ -4,6 +4,7 @@ pub mod auth;
 pub mod mcp;
 pub mod products;
 pub mod profile;
+pub mod questions;
 pub mod records;
 pub mod reviews;
 pub mod self_update;
@@ -20,15 +21,14 @@ use serde::Serialize;
 use crate::api_error::ErrorContext;
 use crate::auth::{EnvSnapshot, StdinSource, TokenFlags, DEFAULT_BASE_URL};
 use crate::cli::{
-    AuthVerb, Command, CommentArgs, CreateProductArgs, CreateReviewArgs, GlobalArgs, ProductsVerb,
-    ProfileVerb, RecordsVerb, ReviewsVerb, SelfVerb, UpdateInput, UpdateProductArgs,
-    UpdateReviewArgs,
+    AuthVerb, Command, CommentArgs, CreateProductArgs, CreateQuestionArgs, CreateReviewArgs,
+    GlobalArgs, ProductsVerb, ProfileVerb, QuestionsVerb, RecordsVerb, ReviewsVerb, SelfVerb,
+    UpdateInput, UpdateProductArgs, UpdateQuestionArgs, UpdateReviewArgs,
 };
 use crate::clock::Clock;
 use crate::config::{self, Paths};
 use crate::error::CliError;
 use crate::http::{ApiClient, HttpSettings};
-use crate::resources;
 use crate::term::Reporter;
 
 pub struct Ctx {
@@ -111,7 +111,7 @@ pub fn dispatch(command: Command, ctx: &Ctx) -> Result<Outcome, CliError> {
     match command {
         Command::Reviews { verb } => reviews::run(verb, ctx),
         Command::Products { verb } => products::run(verb, ctx),
-        Command::Questions { verb } => records::run(&resources::QUESTIONS, verb, ctx),
+        Command::Questions { verb } => questions::run(verb, ctx),
         Command::Auth { verb } => auth::run(verb, ctx),
         Command::Profile { verb } => profile::run(verb, ctx),
         Command::SelfCmd { verb } => self_update::run(verb, ctx),
@@ -150,6 +150,16 @@ pub fn is_dry_run(command: &Command) -> bool {
         }
         | Command::Products {
             verb: ProductsVerb::Update(UpdateProductArgs { dry, .. }),
+        }
+        | Command::Questions {
+            verb: QuestionsVerb::Create(CreateQuestionArgs { dry, .. }),
+        }
+        | Command::Questions {
+            verb:
+                QuestionsVerb::Update(UpdateQuestionArgs {
+                    input: UpdateInput { dry, .. },
+                    ..
+                }),
         } => dry.dry_run,
         _ => false,
     }
@@ -161,7 +171,7 @@ pub fn command_name(command: &Command) -> String {
         Command::Mcp(_) => return "mcp".to_string(),
         Command::Reviews { verb } => ("reviews", reviews_verb(verb)),
         Command::Products { verb } => ("products", products_verb(verb)),
-        Command::Questions { verb } => ("questions", records_verb(verb)),
+        Command::Questions { verb } => ("questions", questions_verb(verb)),
         Command::Auth { verb } => (
             "auth",
             match verb {
@@ -203,6 +213,14 @@ fn reviews_verb(verb: &ReviewsVerb) -> &'static str {
         ReviewsVerb::Create(_) => "create",
         ReviewsVerb::Comment(_) => "comment",
         ReviewsVerb::Update(_) => "update",
+    }
+}
+
+fn questions_verb(verb: &QuestionsVerb) -> &'static str {
+    match verb {
+        QuestionsVerb::Records(verb) => records_verb(verb),
+        QuestionsVerb::Create(_) => "create",
+        QuestionsVerb::Update(_) => "update",
     }
 }
 

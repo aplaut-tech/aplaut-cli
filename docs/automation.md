@@ -12,7 +12,7 @@ MCP-клиентам удобнее `aplaut mcp`: те же команды ин�
 | `--json` | итог и ошибка — одной строкой JSON; предупреждения — в `warnings`, а не текстом; включает `--no-input` |
 | `--no-input` | ничего не спрашивать: вместо вопроса — ошибка с подсказкой, какой флаг передать |
 | `--yes` (`-y`) | подтвердить удаление без вопроса (`profile delete`) |
-| `--dry-run` (`-n`) | у `profile set/delete`, `auth login/logout`, `reviews create/comment/update`, `products create/update`, `self update`: всё проверить и вернуть план в `result`, ничего не меняя |
+| `--dry-run` (`-n`) | у `profile set/delete`, `auth login/logout`, `reviews create/comment/update`, `products create/update`, `questions create/update`, `self update`: всё проверить и вернуть план в `result`, ничего не меняя |
 
 ## JSON-конверт
 

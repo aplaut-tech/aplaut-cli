@@ -100,7 +100,7 @@ pub enum Command {
     #[command(arg_required_else_help = true)]
     Questions {
         #[command(subcommand)]
-        verb: RecordsVerb,
+        verb: QuestionsVerb,
     },
     /// Токен доступа: сохранить или удалить
     #[command(arg_required_else_help = true)]

@@ -3,7 +3,9 @@
 
 use serde_json::Value;
 
-use super::writes::{check_texts, execute, id_of, prepare, write_operation, Submission};
+use super::writes::{
+    check_texts, create_unique, execute, id_of, prepare, write_operation, Submission,
+};
 use super::{check_id, records, Ctx, Outcome};
 use crate::cli::{CreateProductArgs, ProductFields, ProductsVerb, UpdateProductArgs};
 use crate::error::CliError;
@@ -34,29 +36,13 @@ fn create(args: &CreateProductArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
         .chain([CREATE_ALSO_REQUIRED])
         .collect();
     let attributes = prepare(spec, &required, args.data.as_deref(), &flags, ctx)?;
-    let external_id = attributes
-        .get("external_id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    // Второй товар с тем же external_id сервер не создаст (422 is already taken, P6).
-    let verify = match check_id(&external_id, "external_id") {
-        Ok(()) => format!(
-            "повтор безопасен: второй товар с тем же external_id сервер не создаст; проверить — aplaut products get {}",
-            shell_word(&external_id)
-        ),
-        Err(_) => "повтор безопасен: второй товар с тем же external_id сервер не создаст; проверьте товар в личном кабинете".to_string(),
-    };
-    let submission = Submission {
-        request: write::request(spec, path, attributes),
-        replay: Replay::OnlyIfUnprocessed,
-        verify,
-        outcome: "created",
-    };
-    execute(submission, args.dry.dry_run, ctx, |created| {
-        format!("Товар создан: id {}", id_of(created))
-    })
-    .map_err(|err| already_taken(err, &external_id))
+    create_unique(
+        &resources::PRODUCTS,
+        "external_id",
+        write::request(spec, path, attributes),
+        args.dry.dry_run,
+        ctx,
+    )
 }
 
 fn update(args: &UpdateProductArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
@@ -115,27 +101,6 @@ fn update(args: &UpdateProductArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
     execute(submission, args.dry.dry_run, ctx, |updated| {
         format!("Товар обновлён: id {}", id_of(updated))
     })
-}
-
-/// 422 `external_id is already taken`: товар уже есть — его меняет `update`. Другие ошибки
-/// external_id (например, пустой) — не про существующий товар.
-fn already_taken(err: CliError, external_id: &str) -> CliError {
-    let taken = err.code == "validation_failed"
-        && err.field.as_deref() == Some("external_id")
-        && err.message.contains("is already taken");
-    if !taken {
-        return err;
-    }
-    let hint = match check_id(external_id, "external_id") {
-        Ok(()) => format!(
-            "товар с external_id {external_id} уже есть — изменить его: aplaut products update {} …",
-            shell_word(external_id)
-        ),
-        Err(_) => format!(
-            "товар с external_id {external_id} уже есть; такой id update не адресует — измените товар по внутреннему id (поле id в выгрузке scroll)"
-        ),
-    };
-    err.with_hint(hint)
 }
 
 /// Флаги товара → атрибуты схемы POST /products (§1).

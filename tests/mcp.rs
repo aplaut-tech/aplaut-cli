@@ -242,7 +242,9 @@ fn allow_writes_adds_write_tools() {
             "products_create",
             "products_update",
             "questions_scroll",
-            "questions_get"
+            "questions_get",
+            "questions_create",
+            "questions_update"
         ]
     );
     assert_eq!(

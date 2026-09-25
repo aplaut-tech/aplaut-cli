@@ -7,7 +7,7 @@ use std::path::Path;
 use clap::CommandFactory;
 use serde_json::{Map, Value};
 
-use super::{connect, Ctx, Outcome, DRY_RUN_PREFIX};
+use super::{check_id, connect, Ctx, Outcome, DRY_RUN_PREFIX};
 use crate::auth::StdinSource;
 use crate::cli::Cli;
 use crate::error::CliError;
@@ -16,6 +16,7 @@ use crate::ops::write::{self, Flag, WriteRequest};
 use crate::page::record_id;
 use crate::resources::{Resource, Verb};
 use crate::spec::{self, WriteSpec};
+use crate::term::shell_word;
 
 /// Готовая запись: запрос, политика повтора, как проверить исход и ключ записи в `result`.
 pub struct Submission {
@@ -156,4 +157,76 @@ pub fn check_texts(path: &[&str], texts: &[Flag]) -> Result<(), CliError> {
         }
     }
     Ok(())
+}
+
+/// `create`, повтор которого безопасен, если задан внешний id (`key`): второй объект с тем же
+/// значением сервер не создаст, а ответит 422 `is already taken` (товары — P6; вопросы, клиенты,
+/// заказы — стейджинг, 2026-09-25, спека writes-and-exports §9).
+pub fn create_unique(
+    resource: &'static Resource,
+    key: &'static str,
+    request: WriteRequest,
+    dry_run: bool,
+    ctx: &Ctx,
+) -> Result<Outcome, CliError> {
+    let noun = resource.noun;
+    let external_id = request.body["data"]["attributes"][key]
+        .as_str()
+        .map(str::to_string);
+    let submission = Submission {
+        verify: retry_hint(resource, key, external_id.as_deref()),
+        request,
+        replay: Replay::OnlyIfUnprocessed,
+        outcome: "created",
+    };
+    execute(submission, dry_run, ctx, |created| {
+        format!("{} создан: id {}", capitalized(noun.one), id_of(created))
+    })
+    .map_err(|err| already_taken(err, resource, key, external_id.as_deref()))
+}
+
+/// Как проверить исход `request_outcome_unknown`: по внешнему id, если `get` его примет.
+fn retry_hint(resource: &Resource, key: &str, external_id: Option<&str>) -> String {
+    let one = resource.noun.one;
+    match external_id {
+        Some(id) if check_id(id, key).is_ok() => format!(
+            "повтор безопасен: второй {one} с тем же {key} сервер не создаст; проверить — aplaut {} get {}",
+            resource.name,
+            shell_word(id)
+        ),
+        Some(_) => format!(
+            "повтор безопасен: второй {one} с тем же {key} сервер не создаст; проверьте в личном кабинете"
+        ),
+        None => format!(
+            "проверьте в личном кабинете, прежде чем повторять: без {key} повтор создаст второй {one}"
+        ),
+    }
+}
+
+/// 422 `<key> is already taken`: объект уже есть — его меняет `update`. Другие ошибки того же
+/// атрибута (например, пустой) — не про существующий объект.
+fn already_taken(
+    err: CliError,
+    resource: &Resource,
+    key: &str,
+    external_id: Option<&str>,
+) -> CliError {
+    let taken = err.code == "validation_failed"
+        && err.field.as_deref() == Some(key)
+        && err.message.contains("is already taken");
+    let Some(id) = external_id.filter(|_| taken) else {
+        return err;
+    };
+    let noun = capitalized(resource.noun.one);
+    let hint = match check_id(id, key) {
+        Ok(()) => format!(
+            "{noun} с {key} {id} уже есть — изменить его: aplaut {} update {} …",
+            resource.name,
+            shell_word(id)
+        ),
+        Err(_) => format!(
+            "{noun} с {key} {id} уже есть; такой id update не адресует — измените его по внутреннему id (поле id записи)"
+        ),
+    };
+    err.with_hint(hint)
 }

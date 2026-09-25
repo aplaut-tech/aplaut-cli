@@ -10,7 +10,7 @@ JSON, ошибками и кодами выхода — `aplaut <ресурс> <
 | [`profile`](#profile) — профили | [`list`](#profile-list), [`get`](#profile-get), [`set`](#profile-set), [`delete`](#profile-delete), [`edit`](#profile-edit) |
 | `reviews` — отзывы | [`scroll`](#scroll), [`get`](#get), [`create`](#reviews-create), [`comment`](#reviews-comment), [`update`](#reviews-update) |
 | `products` — товары | [`scroll`](#scroll), [`get`](#get), [`create`](#products-create), [`update`](#products-update) |
-| `questions` — вопросы | [`scroll`](#scroll), [`get`](#get) |
+| `questions` — вопросы | [`scroll`](#scroll), [`get`](#get), [`create`](#questions-create), [`update`](#questions-update) |
 | [`self`](#self) — сам aplaut | [`update`](#self-update) |
 | [`mcp`](#mcp) — MCP-сервер для агентов | — (`aplaut mcp`) |
 
@@ -458,6 +458,44 @@ echo '{"price":5490,"custom_attributes":{"color":"black","old_key":null}}' | apl
 `update` меняет только переданные атрибуты; `custom_attributes` сливаются, `null` очищает. Правка
 повторяется после сбоя, как чтение; со сменой `external_id` — только если сервер точно её не получил.
 Вычисляемые `rating`, `reviews_count`, `recommended` сервер не меняет, поэтому они — `unknown_attribute`.
+
+### questions create
+
+```text
+aplaut questions create [--text TEXT] [--product-id ID] [--external-id ID] [--author-name TEXT]
+    [--author-email EMAIL] [--state STATE] [--data FILE|-] [-n]
+```
+
+Создаёт вопрос (`POST /questions`). Обязателен `text`; без `--product-id` вопрос — о компании.
+
+| Флаг | Что делает |
+|---|---|
+| `--text TEXT` | текст вопроса |
+| `--product-id ID` | товар (обычно `offer.id` из YML) |
+| `--external-id ID` | id вопроса в вашей системе: повтор после сбоя не создаст второй вопрос |
+| `--author-name TEXT`, `--author-email EMAIL` | автор |
+| `--state STATE` | статус модерации: `published`, `waiting` (по умолчанию), `banned` |
+| `--data FILE\|-` | остальные атрибуты: `tags`, `files`, `hide_my_data`, даты |
+| `-n`, `--dry-run` | показать запрос, не отправляя |
+
+```bash
+aplaut questions create --text "Есть размер M?" --product-id 444772 --external-id crm-q-17
+```
+
+### questions update
+
+```text
+aplaut questions update <ID> [--text TEXT] [--product-id ID] [--author-name TEXT] [--author-email EMAIL]
+    [--state STATE] [--data FILE|-] [--upsert] [-n]
+```
+
+Меняет вопрос (`PUT /questions/{id}`) по правилам [`update`](#запись). У вопроса о товаре CLI сам
+добавляет в тело `product_id` из текущей записи, если `--product-id` не передан: без него сервер
+сохраняет правку, но отвечает 404. `--upsert` создаёт вопрос с `external_id` = `ID` (нужен `text`).
+
+```bash
+aplaut questions update crm-q-17 --state published
+```
 
 ## self
 

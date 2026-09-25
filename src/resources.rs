@@ -89,7 +89,7 @@ pub static PRODUCTS: Resource = Resource {
 pub static QUESTIONS: Resource = Resource {
     name: "questions",
     records_type: "questions",
-    verbs: &[Verb::Scroll, Verb::Get],
+    verbs: &[Verb::Scroll, Verb::Get, Verb::Create, Verb::Update],
     noun: Noun {
         one: "вопрос",
         genitive: "вопроса",
