@@ -39,8 +39,15 @@ pub struct WriteSpec {
     pub resource_type: &'static str,
     pub required: &'static [&'static str],
     pub attributes: &'static [AttributeSpec],
-    /// Частичное обновление: `null` очищает атрибут (стейджинг, 2026-09-24; спека products-write §6).
+    /// `null` очищает атрибут (частичный PUT товара, клиента, заказа). У остальных `null` — ошибка до
+    /// сети: сервер его молча игнорирует (стейджинг, 2026-09-25; спека writes-and-exports §9).
     pub nullable: bool,
+    /// Атрибуты схемы спеки, которые сервер в этой операции молча игнорирует (внешний id в PUT):
+    /// в `attributes` их нет, `validate` отвергает их с объяснением.
+    pub ignored: &'static [&'static str],
+    /// Атрибуты, которые сервер применяет, только когда PUT создаёт объект (upsert): e-mail и
+    /// телефон клиента.
+    pub create_only: &'static [&'static str],
 }
 
 impl WriteSpec {
@@ -159,6 +166,15 @@ mod tests {
             Some(&["author", "product", "answers"][..])
         );
         assert_eq!(
+            get_includes("consumers"),
+            Some(&["reviews", "questions", "orders"][..])
+        );
+        assert_eq!(
+            get_includes("orders"),
+            Some(&["consumer"][..]),
+            "стейджинг, 2026-09-25: product и products — 422"
+        );
+        assert_eq!(
             get_includes("users"),
             Some(&[][..]),
             "GET есть, include нет"
@@ -220,7 +236,6 @@ mod tests {
             comment.attribute("files").unwrap().item_type,
             Some(AttrType::Object)
         );
-        assert!(write_spec("PUT", "/reviews/{id}").is_none());
     }
 
     /// Стейджинг, 2026-09-24 (спека products-write §6): PUT частичный и принимает атрибуты создания.
@@ -251,6 +266,60 @@ mod tests {
         assert!(update.attribute("brand_name").is_some());
         assert!(
             update.attribute("rating").is_none() && update.attribute("reviews_count").is_none()
+        );
+    }
+
+    /// Стейджинг, 2026-09-25 (спека writes-and-exports §9): PUT частичный у всех четырёх; внешний id
+    /// он игнорирует; null очищает только у клиента и заказа; e-mail и телефон клиента — только при
+    /// создании.
+    #[test]
+    fn upsert_write_schemas_follow_staging() {
+        for (path, resource_type, nullable, ignored) in [
+            ("/reviews/{id}", "reviews", false, "external_id"),
+            ("/questions/{id}", "questions", false, "external_id"),
+            ("/consumers/{id}", "consumers", true, "external_id"),
+            ("/orders/{id}", "orders", true, "number"),
+        ] {
+            let update = write_spec("PUT", path).unwrap_or_else(|| panic!("PUT {path}"));
+            assert_eq!(
+                (update.resource_type, update.required, update.nullable),
+                (resource_type, &[][..], nullable),
+                "{path}"
+            );
+            assert_eq!(update.ignored, &[ignored][..], "{path}");
+            assert!(
+                update.attribute(ignored).is_none(),
+                "{path}: {ignored} — не параметр"
+            );
+        }
+        let consumer = write_spec("PUT", "/consumers/{id}").unwrap();
+        assert_eq!(consumer.create_only, &["email", "phone"][..]);
+        assert!(
+            consumer.attribute("email").is_some(),
+            "с --upsert email нужен"
+        );
+        let question = write_spec("POST", "/questions").expect("POST /questions");
+        assert_eq!(
+            (question.resource_type, question.required),
+            ("questions", &["text"][..])
+        );
+        let mut required = write_spec("POST", "/consumers").unwrap().required.to_vec();
+        required.sort_unstable();
+        assert_eq!(
+            required,
+            ["email", "name"],
+            "спека; команда требует по серверу"
+        );
+        let order = write_spec("POST", "/orders").expect("POST /orders");
+        assert_eq!(
+            order.attribute("order_lines").unwrap().item_type,
+            Some(AttrType::Object)
+        );
+        assert!(order.attribute("number").is_some());
+        let product = write_spec("PUT", "/products/{id}").unwrap();
+        assert!(
+            product.ignored.is_empty() && product.create_only.is_empty(),
+            "товар переименовывается (P7)"
         );
     }
 }

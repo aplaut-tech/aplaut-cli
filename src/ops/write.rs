@@ -146,6 +146,9 @@ pub fn validate(
     flags: &[Flag],
 ) -> Result<(), CliError> {
     for (name, value) in attributes {
+        if spec.ignored.contains(&name.as_str()) {
+            return Err(ignored(spec, name));
+        }
         let attribute = spec.attribute(name).ok_or_else(|| unknown(spec, name))?;
         if value.is_null() && spec.nullable {
             continue;
@@ -314,6 +317,22 @@ fn shown(value: &Value) -> String {
     }
     let cut: String = text.chars().take(MAX_SHOWN_CHARS).collect();
     format!("{cut}…")
+}
+
+/// Атрибут есть в схеме спеки, но сервер в этой операции его молча игнорирует — внешний id в PUT
+/// (стейджинг, 2026-09-25; спека writes-and-exports §9): агент должен узнать об этом до запроса.
+fn ignored(spec: &WriteSpec, name: &str) -> CliError {
+    CliError::usage(
+        "invalid_attribute",
+        format!(
+            "атрибут «{name}»: {} {} его не меняет — сервер молча оставляет прежнее значение",
+            spec.method, spec.path
+        ),
+    )
+    .with_field(name)
+    .with_hint(
+        "внешний идентификатор задаётся при создании: у create — атрибутом, у update --upsert — ID из пути",
+    )
 }
 
 fn unknown(spec: &WriteSpec, name: &str) -> CliError {
@@ -578,6 +597,32 @@ mod tests {
         assert!(check_stdin(Some(dash), false, Some(Path::new("token.txt"))).is_ok());
         assert!(check_stdin(Some(Path::new("review.json")), true, None).is_ok());
         assert!(check_stdin(None, true, None).is_ok());
+    }
+
+    #[test]
+    fn attributes_the_server_ignores_are_refused_with_a_reason() {
+        let update = spec::write_spec("PUT", "/reviews/{id}").unwrap();
+        let err = validate(
+            update,
+            &object(json!({"external_id": "crm-2", "state": "banned"})),
+            &[],
+            &[],
+        )
+        .unwrap_err();
+        assert_eq!(
+            (err.code.as_str(), err.field.as_deref(), err.exit),
+            ("invalid_attribute", Some("external_id"), Exit::Usage)
+        );
+        assert!(err.message.contains("PUT /reviews/{id}"), "{}", err.message);
+        assert!(err.hint.unwrap().contains("--upsert"));
+        let err = validate(update, &object(json!({"pros": null})), &[], &[]).unwrap_err();
+        assert_eq!(
+            (err.code.as_str(), err.field.as_deref()),
+            ("invalid_attribute", Some("pros")),
+            "null у отзыва сервер игнорирует"
+        );
+        let consumer = spec::write_spec("PUT", "/consumers/{id}").unwrap();
+        validate(consumer, &object(json!({"first_name": null})), &[], &[]).unwrap();
     }
 
     #[test]

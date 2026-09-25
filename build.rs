@@ -24,36 +24,85 @@ struct WriteOp {
     schema: (&'static str, &'static str),
     /// Частичное обновление: обязательных атрибутов нет.
     partial: bool,
+    /// `null` очищает атрибут. Иначе `null` — ошибка до сети: сервер его молча игнорирует.
+    nullable: bool,
+    /// Атрибуты схемы, которые сервер в этой операции молча игнорирует (внешний id в PUT): в таблицу
+    /// атрибутов не попадают, `validate` отвергает их с объяснением.
+    ignored: &'static [&'static str],
+    /// Атрибуты, которые сервер применяет, только когда PUT создаёт объект (upsert).
+    create_only: &'static [&'static str],
 }
 
-const WRITE_OPERATIONS: [WriteOp; 4] = [
-    WriteOp {
-        method: "POST",
-        path: "/reviews",
-        schema: ("POST", "/reviews"),
-        partial: false,
-    },
-    WriteOp {
-        method: "POST",
-        path: "/reviews/{id}/relationships/comments",
-        schema: ("POST", "/reviews/{id}/relationships/comments"),
-        partial: false,
-    },
-    WriteOp {
-        method: "POST",
-        path: "/products",
-        schema: ("POST", "/products"),
-        partial: false,
-    },
+impl WriteOp {
+    /// POST со своей схемой; обязательные — из спеки.
+    const fn create(path: &'static str) -> WriteOp {
+        WriteOp {
+            method: "POST",
+            path,
+            schema: ("POST", path),
+            partial: false,
+            nullable: false,
+            ignored: &[],
+            create_only: &[],
+        }
+    }
+
+    /// PUT со своей схемой: частичный, обязательных нет.
+    const fn update(path: &'static str) -> WriteOp {
+        WriteOp {
+            method: "PUT",
+            path,
+            schema: ("PUT", path),
+            partial: true,
+            nullable: false,
+            ignored: &[],
+            create_only: &[],
+        }
+    }
+}
+
+const WRITE_OPERATIONS: [WriteOp; 11] = [
+    WriteOp::create("/reviews"),
+    WriteOp::create("/reviews/{id}/relationships/comments"),
+    WriteOp::create("/products"),
     // Стейджинг, 2026-09-24 (спека products-write §6): PUT частичный и принимает атрибуты создания
     // (категорию, бренд); схема PUT в спеке — `ProductAttributes` с вычисляемыми полями.
     WriteOp {
-        method: "PUT",
-        path: "/products/{id}",
         schema: ("POST", "/products"),
-        partial: true,
+        nullable: true,
+        ..WriteOp::update("/products/{id}")
+    },
+    // Стейджинг, 2026-09-25 (спека writes-and-exports §9): PUT отзыва, вопроса, клиента и заказа
+    // частичный и создаёт объект, если его нет; внешний id (у заказа — number) молча игнорирует;
+    // null очищает атрибут только у клиента и заказа; e-mail и телефон клиента — только при создании.
+    WriteOp {
+        ignored: &["external_id"],
+        ..WriteOp::update("/reviews/{id}")
+    },
+    WriteOp::create("/questions"),
+    WriteOp {
+        ignored: &["external_id"],
+        ..WriteOp::update("/questions/{id}")
+    },
+    WriteOp::create("/consumers"),
+    WriteOp {
+        nullable: true,
+        ignored: &["external_id"],
+        create_only: &["email", "phone"],
+        ..WriteOp::update("/consumers/{id}")
+    },
+    WriteOp::create("/orders"),
+    WriteOp {
+        nullable: true,
+        ignored: &["number"],
+        ..WriteOp::update("/orders/{id}")
     },
 ];
+
+/// Поправки к `include` у `GET /{type}/{id}`: сервер принимает не то, что в спеке. Стейджинг,
+/// 2026-09-25 (спека writes-and-exports §9): у заказа — только `consumer`; `product` из спеки и
+/// `products` — 422 «is not included in the list».
+const GET_INCLUDE_OVERRIDES: [(&str, &[&str]); 1] = [("orders", &["consumer"])];
 
 fn main() {
     println!("cargo:rerun-if-changed={SPEC_PATH}");
@@ -139,8 +188,26 @@ fn main() {
         operations(spec)
     )
     .unwrap();
+    let get: Vec<(String, Vec<String>)> = get_includes(spec)
+        .into_iter()
+        .map(|(records_type, includes)| {
+            match GET_INCLUDE_OVERRIDES
+                .iter()
+                .find(|(t, _)| *t == records_type)
+            {
+                Some((_, fixed)) => (records_type, fixed.iter().map(|s| s.to_string()).collect()),
+                None => (records_type, includes),
+            }
+        })
+        .collect();
+    for (records_type, _) in GET_INCLUDE_OVERRIDES {
+        assert!(
+            get.iter().any(|(t, _)| t == records_type),
+            "GET_INCLUDE_OVERRIDES: нет GET /{records_type}/{{id}}"
+        );
+    }
     writeln!(out, "pub static GET_INCLUDES: &[(&str, &[&str])] = &[").unwrap();
-    for (records_type, includes) in get_includes(spec) {
+    for (records_type, includes) in get {
         writeln!(out, "    ({records_type:?}, &{includes:?}),").unwrap();
     }
     writeln!(out, "];").unwrap();
@@ -277,6 +344,11 @@ fn write_spec(out: &mut String, spec: &Yaml, op: &WriteOp) {
     let properties = attributes["properties"]
         .as_hash()
         .unwrap_or_else(|| panic!("spec: {what}: нет properties атрибутов"));
+    for name in op.ignored.iter().chain(op.create_only) {
+        if !properties.contains_key(&Yaml::String((*name).to_string())) {
+            panic!("spec: {what}: атрибута {name} нет в схеме");
+        }
+    }
     writeln!(
         out,
         "    WriteSpec {{ method: {method:?}, path: {path:?}, resource_type: {resource_type:?}, required: &{:?}, attributes: &[",
@@ -289,6 +361,9 @@ fn write_spec(out: &mut String, spec: &Yaml, op: &WriteOp) {
     .unwrap();
     for (name, schema) in properties {
         let name = text(name, &what);
+        if op.ignored.contains(&name) {
+            continue;
+        }
         let at = format!("{what}: {name}");
         let schema = resolve(spec, schema, &at);
         let ty = attr_type(&schema["type"], &at);
@@ -309,7 +384,12 @@ fn write_spec(out: &mut String, spec: &Yaml, op: &WriteOp) {
         )
         .unwrap();
     }
-    writeln!(out, "    ], nullable: {} }},", op.partial).unwrap();
+    writeln!(
+        out,
+        "    ], nullable: {}, ignored: &{:?}, create_only: &{:?} }},",
+        op.nullable, op.ignored, op.create_only
+    )
+    .unwrap();
 }
 
 fn attr_type(node: &Yaml, what: &str) -> &'static str {
