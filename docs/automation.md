@@ -17,10 +17,10 @@ MCP-клиентам удобнее `aplaut mcp`: те же команды ин�
 ## JSON-конверт
 
 ```json
-{"ok":true,"command":"profile.set","cli_version":"0.4.0","dry_run":false,
+{"ok":true,"command":"profile.set","cli_version":"0.5.0","dry_run":false,
  "result":{"profile":"staging","created":true,"changes":[{"field":"base_url","from":null,"to":"https://…"}],"config_path":"…"},
  "warnings":[]}
-{"ok":false,"command":"reviews.scroll","cli_version":"0.4.0","dry_run":false,
+{"ok":false,"command":"reviews.scroll","cli_version":"0.5.0","dry_run":false,
  "error":{"code":"rate_limited","message":"…","field":null,"retryable":true,"retry_after":30,"hint":"…","request_id":"…"},
  "warnings":[{"code":"default_filter","message":"…"}]}
 ```
