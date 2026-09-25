@@ -45,27 +45,55 @@ impl Verb {
     }
 }
 
+/// Как назвать объект ресурса в сообщениях. Все — мужского рода: «создан», «обновлён».
+#[derive(Debug, Clone, Copy)]
+pub struct Noun {
+    /// «отзыв»
+    pub one: &'static str,
+    /// «отзыва»: «Отзыва crm-4211 нет»
+    pub genitive: &'static str,
+}
+
 #[derive(Debug)]
 pub struct Resource {
     pub name: &'static str,
     pub records_type: &'static str,
     pub verbs: &'static [Verb],
+    pub noun: Noun,
 }
 
 pub static REVIEWS: Resource = Resource {
     name: "reviews",
     records_type: "reviews",
-    verbs: &[Verb::Scroll, Verb::Get, Verb::Create, Verb::Comment],
+    verbs: &[
+        Verb::Scroll,
+        Verb::Get,
+        Verb::Create,
+        Verb::Comment,
+        Verb::Update,
+    ],
+    noun: Noun {
+        one: "отзыв",
+        genitive: "отзыва",
+    },
 };
 pub static PRODUCTS: Resource = Resource {
     name: "products",
     records_type: "products",
     verbs: &[Verb::Scroll, Verb::Get, Verb::Create, Verb::Update],
+    noun: Noun {
+        one: "товар",
+        genitive: "товара",
+    },
 };
 pub static QUESTIONS: Resource = Resource {
     name: "questions",
     records_type: "questions",
     verbs: &[Verb::Scroll, Verb::Get],
+    noun: Noun {
+        one: "вопрос",
+        genitive: "вопроса",
+    },
 };
 
 pub static ALL: &[&Resource] = &[&REVIEWS, &PRODUCTS, &QUESTIONS];

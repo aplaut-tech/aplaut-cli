@@ -418,6 +418,7 @@ mod tests {
                 "reviews_get",
                 "reviews_create",
                 "reviews_comment",
+                "reviews_update",
                 "products_scroll",
                 "products_get",
                 "products_create",
@@ -545,6 +546,7 @@ mod tests {
             ("reviews_get", Some(json!(["id"]))),
             ("reviews_create", None),
             ("reviews_comment", Some(json!(["review_id"]))),
+            ("reviews_update", Some(json!(["id"]))),
             ("products_update", Some(json!(["id"]))),
         ] {
             let tool = find(&catalog, name);

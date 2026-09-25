@@ -236,6 +236,7 @@ fn allow_writes_adds_write_tools() {
             "reviews_get",
             "reviews_create",
             "reviews_comment",
+            "reviews_update",
             "products_scroll",
             "products_get",
             "products_create",

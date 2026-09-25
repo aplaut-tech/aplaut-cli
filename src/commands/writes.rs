@@ -1,5 +1,5 @@
-//! Общее для команд записи (reviews create/comment, products create/update): схема из спеки,
-//! ввод и проверка до сети, план под `-n` или отправка.
+//! Общее для команд записи (reviews create/comment, products create/update, create новых
+//! ресурсов): схема из спеки, ввод и проверка до сети, план под `-n` или отправка.
 
 use std::io::{self, IsTerminal};
 use std::path::Path;
@@ -89,21 +89,35 @@ pub fn execute(
         outcome,
     } = submission;
     if dry_run {
-        ctx.reporter.info(&format!(
-            "{DRY_RUN_PREFIX} {} {}",
-            request.method, request.path
-        ));
-        ctx.reporter
-            .info(&serde_json::to_string_pretty(&request.body).expect("JSON сериализуется"));
+        report_plan(&request, ctx);
         return Ok(Outcome::stdout(write::result(&request, outcome, None)).with_dry_run(true));
     }
-    let record = write::submit(&mut api, &request, replay, &verify)?;
+    let record = write::submit(&mut api, &request, replay, &verify)?.record;
     ctx.reporter.info(&done(&record));
     Ok(Outcome::stdout(write::result(
         &request,
         outcome,
         Some(record),
     )))
+}
+
+/// Текст плана под `-n`: метод, путь и тело (agent mode §5).
+pub fn report_plan(request: &WriteRequest, ctx: &Ctx) {
+    ctx.reporter.info(&format!(
+        "{DRY_RUN_PREFIX} {} {}",
+        request.method, request.path
+    ));
+    ctx.reporter
+        .info(&serde_json::to_string_pretty(&request.body).expect("JSON сериализуется"));
+}
+
+/// Слово с заглавной буквы — начало сообщения: «Отзыв обновлён».
+pub fn capitalized(word: &str) -> String {
+    let mut chars = word.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
 }
 
 pub fn id_of(record: &Value) -> &str {

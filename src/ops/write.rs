@@ -31,6 +31,13 @@ pub struct WriteRequest {
     pub body: Value,
 }
 
+/// Ответ записи: статус (у PUT с upsert 201 — объект создан, 200 — изменён) и `data` ответа.
+#[derive(Debug)]
+pub struct Written {
+    pub status: u16,
+    pub record: Value,
+}
+
 /// `result` команды записи: `{"request": …, "<outcome>": запись | null}` — одинаковый под `-n` (W9).
 pub fn result(request: &WriteRequest, outcome: &str, record: Option<Value>) -> Value {
     let mut result = Map::new();
@@ -173,14 +180,14 @@ pub fn request(spec: &WriteSpec, path: String, attributes: Map<String, Value>) -
     }
 }
 
-/// Отправка (W7). 2xx — запись создана или изменена: `data` ответа. `replay` — когда повтор
-/// безопасен; исход неизвестен — в подсказке `verify`: как проверить, прежде чем повторять.
+/// Отправка (W7). 2xx — запись создана или изменена: статус и `data` ответа. `replay` — когда
+/// повтор безопасен; исход неизвестен — в подсказке `verify`: как проверить, прежде чем повторять.
 pub fn submit(
     api: &mut ApiClient,
     request: &WriteRequest,
     replay: Replay,
     verify: &str,
-) -> Result<Value, CliError> {
+) -> Result<Written, CliError> {
     let method = Method::from_name(request.method).ok_or_else(|| {
         CliError::general(
             "internal",
@@ -193,7 +200,7 @@ pub fn submit(
             http::OUTCOME_UNKNOWN => err.with_hint(verify),
             _ => err,
         })?;
-    serde_json::from_slice::<Value>(&response.body)
+    let record = serde_json::from_slice::<Value>(&response.body)
         .ok()
         .and_then(|mut doc| doc.get_mut("data").map(Value::take))
         .filter(Value::is_object)
@@ -213,7 +220,11 @@ pub fn submit(
                     format!("запрос, скорее всего, выполнен — не повторяйте вслепую: {verify}")
                 }
             })
-        })
+        })?;
+    Ok(Written {
+        status: response.status,
+        record,
+    })
 }
 
 /// Что не так со значением: для сообщения и подсказки.

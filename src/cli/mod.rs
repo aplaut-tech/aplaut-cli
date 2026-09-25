@@ -9,8 +9,12 @@ use clap::{Args, Parser, Subcommand};
 use crate::output::Format;
 
 mod help;
+mod help_writes;
+mod writes;
 
 use help::*;
+use help_writes::*;
+pub use writes::*;
 
 pub const VERSION: &str = concat!(
     env!("CARGO_PKG_VERSION"),
@@ -208,6 +212,9 @@ pub enum ReviewsVerb {
     /// Ответить на отзыв (POST /reviews/{id}/relationships/comments)
     #[command(after_help = LEAF_AFTER_HELP, after_long_help = REVIEWS_COMMENT_AFTER_LONG_HELP)]
     Comment(CommentArgs),
+    /// Изменить отзыв (PUT /reviews/{id}): меняются только переданные атрибуты; нет отзыва — ошибка, с --upsert — создать
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = REVIEWS_UPDATE_AFTER_LONG_HELP)]
+    Update(UpdateReviewArgs),
 }
 
 #[derive(Debug, Clone, Args)]

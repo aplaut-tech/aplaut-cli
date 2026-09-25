@@ -8,7 +8,7 @@ JSON, ошибками и кодами выхода — `aplaut <ресурс> <
 |---|---|
 | [`auth`](#auth) — токен доступа | [`login`](#auth-login), [`logout`](#auth-logout) |
 | [`profile`](#profile) — профили | [`list`](#profile-list), [`get`](#profile-get), [`set`](#profile-set), [`delete`](#profile-delete), [`edit`](#profile-edit) |
-| `reviews` — отзывы | [`scroll`](#scroll), [`get`](#get), [`create`](#reviews-create), [`comment`](#reviews-comment) |
+| `reviews` — отзывы | [`scroll`](#scroll), [`get`](#get), [`create`](#reviews-create), [`comment`](#reviews-comment), [`update`](#reviews-update) |
 | `products` — товары | [`scroll`](#scroll), [`get`](#get), [`create`](#products-create), [`update`](#products-update) |
 | `questions` — вопросы | [`scroll`](#scroll), [`get`](#get) |
 | [`self`](#self) — сам aplaut | [`update`](#self-update) |
@@ -306,12 +306,19 @@ Id с точкой или `/` CLI не отправляет (код 2): серв
 `--fields` будет ошибкой; если имя проверить не удалось (на первой странице не было, например,
 объектов `author`), колонка останется пустой, а CLI один раз предупредит, когда это выяснится.
 
-## Запись: reviews, products
+## Запись
 
 У API нет идемпотентности. CLI повторяет запрос сам, только если сервер точно его не обработал
 (429, 503, соединение не установилось). После таймаута, обрыва или 5xx — `request_outcome_unknown`:
-проверьте, выполнена ли запись, прежде чем повторять. Исключение — `products update` без смены
-`external_id`: правка повторяется, как чтение.
+проверьте, выполнена ли запись, прежде чем повторять. Исключение — `update`: правка повторяется, как
+чтение (у `products update` — без смены `external_id`).
+
+`update` ресурсов, у которых API на `PUT` с неизвестным id создаёт объект (все, кроме `products`),
+сначала проверяет запросом `GET`, что объект есть: опечатка в id иначе опубликовала бы новый. Нет
+объекта — код 5, ничего не создано. `--upsert` пропускает проверку: нет объекта — он создаётся, его
+внешний id — `ID` из команды; в `result` — `created: true`. Внешний id через `update` не меняется —
+сервер его молча игнорирует, поэтому CLI отвергает его до отправки. С `-n` CLI проверяет, есть ли
+объект, и показывает запрос; в `result` — `exists`.
 
 Атрибуты и их типы — из схемы тела запроса в спеке. Неизвестный атрибут, значение не того типа
 или не из перечисления, нет обязательного — код 2 до отправки, атрибут назван в `field`. Для
@@ -377,6 +384,29 @@ aplaut reviews comment crm-4211 --text "Спасибо за отзыв!"
 ```
 
 После `request_outcome_unknown` проверка — `aplaut reviews get <REVIEW_ID> --include comments`.
+
+### reviews update
+
+```text
+aplaut reviews update <ID> [--rating N] [--body TEXT] [--pros TEXT] [--cons TEXT] [--product-id ID]
+    [--author-name TEXT] [--author-email EMAIL] [--state STATE] [--data FILE|-] [--upsert] [-n]
+```
+
+Меняет отзыв (`PUT /reviews/{id}`) по правилам [`update`](#запись): только переданные атрибуты,
+`custom_attributes` сливаются. Флаги — как у [`create`](#reviews-create), без `--external-id`.
+
+| Флаг | Что делает |
+|---|---|
+| `--upsert` | нет отзыва — создать его с `external_id` = `ID` (нужны `rating` и текст, как у `create`) |
+
+```bash
+aplaut reviews update crm-4211 --state banned                                # снять с публикации
+aplaut reviews update crm-4211 --rating 5 --body "Спасибо!" --upsert        # синхронизация: создать, если нет
+echo '{"tags":["Featured"],"custom_attributes":{"old":null}}' | aplaut reviews update crm-4211 --data -
+```
+
+`null` у атрибута отзыва сервер молча игнорирует, поэтому CLI его не принимает (в
+`custom_attributes` `null` удаляет ключ).
 
 ### products create
 

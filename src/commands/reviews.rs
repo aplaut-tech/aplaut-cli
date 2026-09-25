@@ -1,11 +1,13 @@
-//! Запись у отзывов: `create` и `comment` (спека reviews-write). Чтение (`scroll`, `get`) —
-//! общее с другими ресурсами, в `records`; общее для записи — в `writes`.
+//! Запись у отзывов: `create`, `comment` (спека reviews-write) и `update` (спека
+//! writes-and-exports §1). Чтение (`scroll`, `get`) — общее с другими ресурсами, в `records`;
+//! общее для записи — в `writes`.
 
 use serde_json::{Map, Value};
 
+use super::updates::{self, UpdateJob};
 use super::writes::{check_texts, execute, id_of, prepare, write_operation, Submission};
 use super::{check_id, records, Ctx, Outcome};
-use crate::cli::{CommentArgs, CreateReviewArgs, ReviewsVerb};
+use crate::cli::{CommentArgs, CreateReviewArgs, ReviewsVerb, UpdateReviewArgs};
 use crate::error::CliError;
 use crate::http::{self, Replay};
 use crate::ops::write::{self, Flag};
@@ -17,6 +19,7 @@ pub fn run(verb: ReviewsVerb, ctx: &Ctx) -> Result<Outcome, CliError> {
         ReviewsVerb::Records(verb) => records::run(&resources::REVIEWS, verb, ctx),
         ReviewsVerb::Create(args) => create(&args, ctx),
         ReviewsVerb::Comment(args) => comment(&args, ctx),
+        ReviewsVerb::Update(args) => update(&args, ctx),
     }
 }
 
@@ -134,6 +137,42 @@ fn comment_flags(args: &CommentArgs) -> Vec<Flag<'_>> {
     ]
 }
 
+fn update(args: &UpdateReviewArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
+    check_texts(
+        &["reviews", "update"],
+        &[
+            ("body", args.body.as_deref()),
+            ("pros", args.pros.as_deref()),
+            ("cons", args.cons.as_deref()),
+        ],
+    )?;
+    updates::run(
+        UpdateJob {
+            resource: &resources::REVIEWS,
+            id: &args.id,
+            flags: update_flags(args),
+            input: &args.input,
+            carry: &[],
+            check: updates::no_check,
+        },
+        ctx,
+    )
+}
+
+/// Флаги `update` → атрибуты схемы PUT /reviews/{id}.
+fn update_flags(args: &UpdateReviewArgs) -> Vec<Flag<'_>> {
+    vec![
+        ("rating", args.rating.as_deref()),
+        ("body", args.body.as_deref()),
+        ("pros", args.pros.as_deref()),
+        ("cons", args.cons.as_deref()),
+        ("product_id", args.product_id.as_deref()),
+        ("author_name", args.author_name.as_deref()),
+        ("author_email", args.author_email.as_deref()),
+        ("state", args.state.as_deref()),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use clap::Parser;
@@ -164,6 +203,13 @@ mod tests {
         };
         for (name, _) in comment_flags(&args) {
             assert!(comment_spec.attribute(name).is_some(), "comment --{name}");
+        }
+        let (update_spec, _) = write_operation(&resources::REVIEWS, Verb::Update).unwrap();
+        let ReviewsVerb::Update(args) = reviews_verb(&["aplaut", "reviews", "update", "r1"]) else {
+            panic!("update");
+        };
+        for (name, _) in update_flags(&args) {
+            assert!(update_spec.attribute(name).is_some(), "update --{name}");
         }
     }
 }

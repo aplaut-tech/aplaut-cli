@@ -12,7 +12,7 @@ MCP-клиентам удобнее `aplaut mcp`: те же команды ин�
 | `--json` | итог и ошибка — одной строкой JSON; предупреждения — в `warnings`, а не текстом; включает `--no-input` |
 | `--no-input` | ничего не спрашивать: вместо вопроса — ошибка с подсказкой, какой флаг передать |
 | `--yes` (`-y`) | подтвердить удаление без вопроса (`profile delete`) |
-| `--dry-run` (`-n`) | у `profile set/delete`, `auth login/logout`, `reviews create/comment`, `products create/update`, `self update`: всё проверить и вернуть план в `result`, ничего не меняя |
+| `--dry-run` (`-n`) | у `profile set/delete`, `auth login/logout`, `reviews create/comment/update`, `products create/update`, `self update`: всё проверить и вернуть план в `result`, ничего не меняя |
 
 ## JSON-конверт
 
@@ -64,11 +64,11 @@ MCP-клиентам удобнее `aplaut mcp`: те же команды ин�
 | `unknown_field` | 2 | колонки из `--fields` нет на первой странице обхода (в `hint` — ближайшее имя и все колонки) |
 | `field_to_many` | 2 | `<связь>.<атрибут>` у связи-списка |
 | `unknown_attribute` | 2 | атрибута нет в схеме тела запроса; в `hint` — ближайшее имя и допустимые |
-| `invalid_attribute` | 2 | значение атрибута не того типа, не из перечисления, вне границ или не RFC 3339 |
+| `invalid_attribute` | 2 | значение атрибута не того типа, не из перечисления, вне границ или не RFC 3339; или атрибут, который сервер в этой операции молча игнорирует (внешний id в `update`) |
 | `missing_attribute` | 2 | не задан обязательный атрибут |
 | `invalid_data` | 2 | `--data` не читается, не JSON-объект или обёрнут в `data` |
 | `stdin_conflict` | 2 | `--data -` вместе с токеном из stdin |
-| `nothing_to_update` | 2 | `products update` без единого атрибута |
+| `nothing_to_update` | 2 | `update` без единого атрибута |
 | `invalid_profile` | 2 | недопустимое имя профиля |
 | `invalid_base_url` | 2 | base URL не разбирается |
 | `insecure_base_url` | 2 | `http://` не для localhost |
@@ -89,7 +89,7 @@ MCP-клиентам удобнее `aplaut mcp`: те же команды ин�
 | `unauthorized`, `invalid_token` | 3 | 401: токен отклонён (код — из `WWW-Authenticate`, если сервер его прислал); у `self update` — GitHub отклонил `APLAUT_CLI_GITHUB_TOKEN` |
 | `forbidden` | 3 | 403: у токена нет прав |
 | `output_closed` | 4 | получатель закрыл stdout (например, `\| head`) |
-| `not_found` | 5 | 404 |
+| `not_found` | 5 | 404; у `update` с проверкой наличия (без `--upsert`) — объекта нет, ничего не создано |
 | `profile_not_found` | 5 | профиля нет; в `hint` — существующие |
 | `rate_limited` | 7 | 429: повторы исчерпаны или ждать дольше 5 минут; `retry_after` — сколько. У `self update` — 403/429 GitHub API, `retry_after` — `null` |
 | `confirmation_required` | 8 | удаление без `--yes` там, где спросить нельзя |

@@ -7,6 +7,7 @@ pub mod profile;
 pub mod records;
 pub mod reviews;
 pub mod self_update;
+pub mod updates;
 pub mod writes;
 
 use std::io::{self, IsTerminal};
@@ -20,7 +21,8 @@ use crate::api_error::ErrorContext;
 use crate::auth::{EnvSnapshot, StdinSource, TokenFlags, DEFAULT_BASE_URL};
 use crate::cli::{
     AuthVerb, Command, CommentArgs, CreateProductArgs, CreateReviewArgs, GlobalArgs, ProductsVerb,
-    ProfileVerb, RecordsVerb, ReviewsVerb, SelfVerb, UpdateProductArgs,
+    ProfileVerb, RecordsVerb, ReviewsVerb, SelfVerb, UpdateInput, UpdateProductArgs,
+    UpdateReviewArgs,
 };
 use crate::clock::Clock;
 use crate::config::{self, Paths};
@@ -136,6 +138,13 @@ pub fn is_dry_run(command: &Command) -> bool {
         | Command::Reviews {
             verb: ReviewsVerb::Comment(CommentArgs { dry, .. }),
         }
+        | Command::Reviews {
+            verb:
+                ReviewsVerb::Update(UpdateReviewArgs {
+                    input: UpdateInput { dry, .. },
+                    ..
+                }),
+        }
         | Command::Products {
             verb: ProductsVerb::Create(CreateProductArgs { dry, .. }),
         }
@@ -193,6 +202,7 @@ fn reviews_verb(verb: &ReviewsVerb) -> &'static str {
         ReviewsVerb::Records(verb) => records_verb(verb),
         ReviewsVerb::Create(_) => "create",
         ReviewsVerb::Comment(_) => "comment",
+        ReviewsVerb::Update(_) => "update",
     }
 }
 
