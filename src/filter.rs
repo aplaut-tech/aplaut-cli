@@ -6,7 +6,7 @@
 use crate::error::CliError;
 
 pub const MAX_IN_VALUES: usize = 25;
-const OPERATORS: &str = "gt, gte, lt, lte, eq, neq, in, exists";
+pub const OPERATORS: &str = "gt, gte, lt, lte, eq, neq, in, exists";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {

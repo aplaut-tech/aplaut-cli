@@ -156,3 +156,82 @@ fn closed_stdin_before_initialize_is_a_handshake_error() {
     assert_eq!(out.code, 1, "{}", out.stderr);
     assert_eq!(out.error_json()["error"]["code"], "mcp_handshake_failed");
 }
+
+fn tool_names(response: &Value) -> Vec<String> {
+    response["result"]["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("нет tools: {response}"))
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect()
+}
+
+fn tool<'a>(response: &'a Value, name: &str) -> &'a Value {
+    response["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == name)
+        .unwrap_or_else(|| panic!("нет {name}"))
+}
+
+/// Имена инструментов — публичный контракт (M13): список меняется осознанно.
+#[test]
+fn read_only_server_lists_scroll_and_get() {
+    let home = TempDir::new("mcp-list");
+    let mut client = Client::start(home.path(), &[], &[TOKEN]);
+    let list = client.request("tools/list", json!({}));
+    assert_eq!(
+        tool_names(&list),
+        [
+            "reviews_scroll",
+            "reviews_get",
+            "products_scroll",
+            "products_get",
+            "questions_scroll",
+            "questions_get"
+        ]
+    );
+    assert_eq!(
+        tool(&list, "reviews_get")["annotations"],
+        json!({"readOnlyHint": true, "openWorldHint": true})
+    );
+    let scroll = tool(&list, "reviews_scroll");
+    assert_eq!(
+        scroll["annotations"]["readOnlyHint"], false,
+        "пишет output_file и state"
+    );
+    assert_eq!(scroll["inputSchema"]["additionalProperties"], false);
+    assert_eq!(client.finish(), 0);
+}
+
+#[test]
+fn allow_writes_adds_write_tools() {
+    let home = TempDir::new("mcp-list-writes");
+    let mut client = Client::start(home.path(), &["--allow-writes"], &[TOKEN]);
+    let list = client.request("tools/list", json!({}));
+    assert_eq!(
+        tool_names(&list),
+        [
+            "reviews_scroll",
+            "reviews_get",
+            "reviews_create",
+            "reviews_comment",
+            "products_scroll",
+            "products_get",
+            "products_create",
+            "products_update",
+            "questions_scroll",
+            "questions_get"
+        ]
+    );
+    assert_eq!(
+        tool(&list, "products_update")["annotations"],
+        json!({"readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": true})
+    );
+    assert_eq!(
+        tool(&list, "reviews_comment")["inputSchema"]["required"],
+        json!(["review_id"])
+    );
+    assert_eq!(client.finish(), 0);
+}

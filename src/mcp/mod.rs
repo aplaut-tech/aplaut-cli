@@ -1,11 +1,14 @@
 //! MCP-сервер `aplaut mcp` (спека mcp-server): stdio через `rmcp`. Каждый вызов инструмента —
 //! дочерний процесс того же бинаря с `--json` (M3). Async и `rmcp` — только в этом модуле (M4).
 
+pub mod tools;
+
 use std::ffi::OsString;
+use std::sync::Arc;
 
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, Implementation, InitializeResult, ListToolsResult,
-    PaginatedRequestParams, ServerCapabilities,
+    PaginatedRequestParams, ServerCapabilities, Tool, ToolAnnotations,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
@@ -45,12 +48,14 @@ pub fn serve(setup: ServerSetup) -> Result<(), CliError> {
 }
 
 struct Server {
+    tools: Vec<tools::ToolDef>,
     instructions: String,
 }
 
 impl Server {
     fn new(setup: ServerSetup) -> Self {
         Server {
+            tools: tools::enabled(setup.allow_writes),
             instructions: setup.instructions,
         }
     }
@@ -68,7 +73,9 @@ impl ServerHandler for Server {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
-        Ok(ListToolsResult::default())
+        Ok(ListToolsResult::with_all_items(
+            self.tools.iter().map(rmcp_tool).collect(),
+        ))
     }
 
     async fn call_tool(
@@ -81,4 +88,23 @@ impl ServerHandler for Server {
             None,
         ))
     }
+}
+
+/// Аннотации — по §2.3: у read-only `destructiveHint` и `idempotentHint` смысла не имеют.
+fn rmcp_tool(def: &tools::ToolDef) -> Tool {
+    let mut annotations = ToolAnnotations::new()
+        .read_only(def.hints.read_only)
+        .open_world(true);
+    if !def.hints.read_only {
+        annotations = annotations
+            .destructive(def.hints.destructive)
+            .idempotent(def.hints.idempotent);
+    }
+    Tool::new(
+        def.name.clone(),
+        def.description.clone(),
+        Arc::new(def.schema.clone()),
+    )
+    .with_title(def.title.clone())
+    .with_annotations(annotations)
 }
