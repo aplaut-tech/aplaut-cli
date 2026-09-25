@@ -113,7 +113,7 @@ fn instructions(allow_writes: bool, target: Result<(String, String), CliError>) 
 
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
 
     use super::*;
     use crate::cli::Cli;
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn help_lists_tools_from_the_catalog() {
-        let mut root = Cli::command_with_dynamic_help();
+        let mut root = Cli::command();
         root.build();
         let help = root
             .find_subcommand_mut("mcp")

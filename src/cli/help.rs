@@ -428,25 +428,3 @@ JSON (--json):
 Коды выхода: 0 — клиент закрыл соединение; 2 — ошибка в параметрах; 1 — прочие ошибки."
     )
 }
-
-// Простой плейсхолдер для компиляции макроса;  реальный текст генерируется in mcp_after_long_help()
-pub(super) const MCP_AFTER_LONG_HELP_PLACEHOLDER: &str = "\
-Примеры:
-  claude mcp add aplaut -- aplaut mcp                                   # Claude Code, профиль по умолчанию
-  claude mcp add aplaut-staging -- aplaut mcp --profile staging
-  claude mcp add aplaut-prod -- aplaut mcp --profile prod --allow-writes
-
-Сервер говорит по MCP через stdin и stdout, пока клиент не закроет stdin. Каждый вызов инструмента —
-команда aplaut с --json и глобальными флагами сервера (--profile, --base-url, --token-file, --timeout,
---max-retries, --verbose): агент их не меняет.
-Инструменты: см. --help.
-Подробнее — docs/mcp.md.
-
-JSON (--json):
-  {\"ok\":true,\"command\":\"mcp\",\"dry_run\":false,\"result\":{\"allow_writes\":false},\"warnings\":[]}
-  конверт — в stderr после завершения сервера: stdout занят протоколом.
-
-Ошибки: usage (--token-stdin или --token-file -: stdin занят протоколом), mcp_handshake_failed (клиент
-закрыл соединение или прислал не MCP до initialize).
-
-Коды выхода: 0 — клиент закрыл соединение; 2 — ошибка в параметрах; 1 — прочие ошибки.";

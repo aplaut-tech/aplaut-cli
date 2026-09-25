@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use clap::builder::{PossibleValuesParser, TypedValueParser};
-use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 use crate::output::Format;
 
@@ -117,7 +117,7 @@ pub enum Command {
         verb: SelfVerb,
     },
     /// MCP-сервер для агентов: команды aplaut — инструментами (stdio)
-    #[command(after_help = LEAF_AFTER_HELP, after_long_help = help::MCP_AFTER_LONG_HELP_PLACEHOLDER)]
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = help::mcp_after_long_help())]
     Mcp(McpArgs),
 }
 
@@ -406,15 +406,4 @@ pub struct DryRun {
 fn format_parser() -> impl TypedValueParser<Value = Format> {
     PossibleValuesParser::new(Format::NAMES)
         .map(|name| Format::from_name(&name).expect("значение уже проверено clap"))
-}
-
-impl Cli {
-    /// Построить дерево команд с динамической справкой MCP (спека R12).
-    pub fn command_with_dynamic_help() -> clap::Command {
-        let mut cmd = Self::command();
-        if let Some(mcp_cmd) = cmd.find_subcommand_mut("mcp") {
-            *mcp_cmd = mcp_cmd.clone().after_long_help(help::mcp_after_long_help());
-        }
-        cmd
-    }
 }
