@@ -58,7 +58,9 @@ rate_limited (retry_after — сколько секунд ждать), server_er
 и запустите ту же команду снова — она продолжит после последней выданной страницы;
 без --state выгрузите заново (повторы в обоих случаях убирайте по id).";
 
-pub(super) const ROOT_AFTER_LONG_HELP: &str = "\
+// Ссылка на каталог — в тег этой версии: коды в `main` могут уйти вперёд установленного бинаря.
+pub(super) const ROOT_AFTER_LONG_HELP: &str = concat!(
+    "\
 Примеры:
   aplaut auth login
   aplaut reviews get crm-4211 --include comments --format jsonl
@@ -78,14 +80,18 @@ pub(super) const ROOT_AFTER_LONG_HELP: &str = "\
   retry_after в ошибке — сколько секунд ждать по словам сервера (429, 503).
   Без терминала ошибка приходит JSON-конвертом и без --json.
   Поля result — в разделе «JSON (--json)» справки команды: aplaut <команда> --help.
-  Каталог кодов ошибок и предупреждений — README, раздел «Для агентов и скриптов».
+  Каталог кодов ошибок и предупреждений:
+  https://github.com/aplaut-tech/aplaut-cli/blob/v",
+    env!("CARGO_PKG_VERSION"),
+    "/docs/automation.md
 
 Коды выхода: 0 — успех; 1 — прочие ошибки; 2 — ошибка в параметрах; 3 — нет токена или он
 отклонён; 4 — выгрузка прервана, в stdout только целые записи; 5 — не найдено;
 7 — rate limit, повторы исчерпаны; 8 — нужно подтверждение (--yes).
 
 Документация: https://aplaut.com/docs/api-references/platform/
-Поддержка: support@aplaut.com";
+Поддержка: support@aplaut.com"
+);
 
 pub(super) const GET_AFTER_LONG_HELP: &str = "\
 Примеры:

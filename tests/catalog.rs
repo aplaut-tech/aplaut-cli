@@ -1,5 +1,5 @@
-//! Каталог кодов в README — контракт для агентов (спека agent mode §4): каждый код ошибки и
-//! предупреждения из src/ должен быть там описан.
+//! Каталог кодов в docs/automation.md — контракт для агентов (спека agent mode §4): каждый код
+//! ошибки и предупреждения из src/ должен быть там описан.
 
 use std::fs;
 use std::path::Path;
@@ -37,11 +37,11 @@ fn codes_after(text: &str, marker: &str) -> Vec<String> {
 }
 
 #[test]
-fn every_error_and_warning_code_is_documented_in_readme() {
+fn every_error_and_warning_code_is_documented_in_catalog() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut texts = Vec::new();
     sources(&root.join("src"), &mut texts);
-    let readme = fs::read_to_string(root.join("README.md")).unwrap();
+    let catalog = fs::read_to_string(root.join("docs/automation.md")).unwrap();
     let mut codes: Vec<String> = texts
         .iter()
         .flat_map(|t| {
@@ -69,7 +69,7 @@ fn every_error_and_warning_code_is_documented_in_readme() {
         ]
         .map(String::from),
     );
-    // Прочие статусы HTTP — `http_<status>` через format!: в README это одна строка каталога.
+    // Прочие статусы HTTP — `http_<status>` через format!: в каталоге это одна строка.
     if texts.iter().any(|t| t.contains("format!(\"http_{")) {
         codes.push("http_<status>".into());
     }
@@ -78,7 +78,10 @@ fn every_error_and_warning_code_is_documented_in_readme() {
     assert!(codes.len() > 40, "сканер сломался: {codes:?}");
     let missing: Vec<&String> = codes
         .iter()
-        .filter(|c| !readme.contains(&format!("`{c}`")))
+        .filter(|c| !catalog.contains(&format!("`{c}`")))
         .collect();
-    assert!(missing.is_empty(), "не описаны в README: {missing:?}");
+    assert!(
+        missing.is_empty(),
+        "не описаны в docs/automation.md: {missing:?}"
+    );
 }
