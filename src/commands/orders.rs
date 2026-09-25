@@ -69,21 +69,30 @@ fn check_order_lines(attributes: &Map<String, Value>) -> Result<(), CliError> {
     let Some(Value::Array(lines)) = attributes.get("order_lines") else {
         return Ok(());
     };
-    let bad = lines.iter().position(|line| {
-        !line
-            .get("product_id")
-            .and_then(Value::as_str)
-            .is_some_and(|id| !id.trim().is_empty())
-    });
+    let bad = lines
+        .iter()
+        .enumerate()
+        .find_map(|(index, line)| order_line_error(index, line.get("product_id")));
     match bad {
         None => Ok(()),
-        Some(index) => Err(CliError::usage(
-            "invalid_attribute",
-            format!("атрибут «order_lines»: у строки {index} нет product_id (строка — id товара)"),
-        )
-        .with_field("order_lines")
-        .with_hint(
-            "строка заказа — {\"product_id\":\"…\",\"name\":\"…\",\"price\":…}; product_id — обычно offer.id из YML",
+        Some(message) => Err(CliError::usage("invalid_attribute", message)
+            .with_field("order_lines")
+            .with_hint(
+                "строка заказа — {\"product_id\":\"…\",\"name\":\"…\",\"price\":…}; product_id — обычно offer.id из YML",
+            )),
+    }
+}
+
+/// Различает две причины отказа: `product_id` нет вовсе (или это пустая строка) и `product_id` есть,
+/// но это не строка (например, число из YML без кавычек).
+fn order_line_error(index: usize, product_id: Option<&Value>) -> Option<String> {
+    match product_id {
+        Some(Value::String(id)) if !id.trim().is_empty() => None,
+        None | Some(Value::String(_)) => Some(format!(
+            "атрибут «order_lines»: у строки {index} нет product_id"
+        )),
+        Some(value) => Some(format!(
+            "атрибут «order_lines»: у строки {index} product_id — не строка, получено {value}"
         )),
     }
 }

@@ -510,8 +510,9 @@ aplaut consumers create [--external-id ID] [--email EMAIL] [--name TEXT] [--firs
 ```
 
 Создаёт клиента (`POST /consumers`). Данные клиентов — персональные: e-mail, телефон, имя.
-Обязательных атрибутов нет — сервер создаёт клиента и без e-mail и имени. Второго клиента с тем же
-`external_id` или e-mail сервер не создаст, поэтому повтор после сбоя безопасен.
+Сервер создал бы клиента и без единого атрибута, но CLI требует хотя бы один из `external_id`,
+`email`, `phone` до сети — иначе клиента потом не найти и не отличить от дубля. Второго клиента с
+тем же `external_id` или e-mail сервер не создаст, поэтому повтор после сбоя безопасен.
 
 | Флаг | Что делает |
 |---|---|
@@ -522,6 +523,10 @@ aplaut consumers create [--external-id ID] [--email EMAIL] [--name TEXT] [--firs
 | `--unsubscribed true\|false` | отписан ли от писем |
 | `--data FILE\|-` | остальные атрибуты: `custom_attributes`, даты |
 | `-n`, `--dry-run` | показать запрос, не отправляя |
+
+```bash
+aplaut consumers create --external-id crm-c-42 --email anna@example.com --name "Анна Петрова"
+```
 
 ### consumers update
 
@@ -567,6 +572,12 @@ aplaut orders update <ID> [--consumer-name TEXT] [--consumer-email EMAIL] [--con
 Меняет заказ (`PUT /orders/{id}`) по правилам [`update`](#запись). `order_lines` сервер **заменяет
 целиком** — передавайте все строки; `details` сливаются, `null` очищает атрибут. `number` не меняется.
 Смена `consumer_email` меняет атрибут заказа, связанный клиент остаётся прежним.
+
+```bash
+aplaut orders update 31337 --consumer-name "Анна Петрова"
+echo '{"order_lines":[{"product_id":"444772","name":"Диск","price":5490}]}' \
+  | aplaut orders update 31337 --data -
+```
 
 ## self
 

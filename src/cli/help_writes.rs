@@ -123,9 +123,10 @@ pub(super) const CONSUMERS_CREATE_AFTER_LONG_HELP: &str = "\
 
 Данные клиентов — персональные: e-mail, телефон, имя.
 Атрибуты — из схемы тела POST /consumers в спеке; флаги перекрывают одноимённые ключи --data.
-Обязательных нет: сервер создаёт клиента и без e-mail и имени, хотя спека их требует. Сервер
-приводит name к виду «Анна Петрова» и сбрасывает first_name, из телефона оставляет цифры.
-custom_attributes и даты — через --data. С -n (--dry-run) токен проверяется, но запросов нет.
+Нужен хотя бы один из external_id, email, phone: сервер создал бы клиента и без них (спека к тому
+же требует name), но такого клиента потом не найти и не отличить от дубля — CLI отказывает до
+сети. Сервер приводит name к виду «Анна Петрова» и сбрасывает first_name, из телефона оставляет
+цифры. custom_attributes и даты — через --data. С -n (--dry-run) токен проверяется, но запросов нет.
 
 Повторы: CLI повторяет запрос сам, только если сервер его точно не обработал. После
 request_outcome_unknown с --external-id повтор безопасен: второго клиента с тем же external_id
@@ -138,10 +139,11 @@ JSON (--json):
    \"created\":{\"id\",\"type\":\"consumers\",\"attributes\":{…}}},\"warnings\":[]}
   С -n — тот же request, \"created\":null и \"dry_run\":true.
 
-Ошибки: unknown_attribute (в hint — допустимые), invalid_attribute, invalid_data, stdin_conflict,
-stdin_is_terminal, validation_failed (422; external_id или email is already taken — клиент уже есть,
-в hint — что делать), request_outcome_unknown, bad_response, no_token, invalid_token, unauthorized,
-forbidden, rate_limited (retry_after — сколько секунд ждать), server_error, network_error.
+Ошибки: unknown_attribute (в hint — допустимые), missing_attribute (нет ни external_id, ни email,
+ни phone), invalid_attribute, invalid_data, stdin_conflict, stdin_is_terminal, validation_failed
+(422; external_id или email is already taken — клиент уже есть, в hint — что делать),
+request_outcome_unknown, bad_response, no_token, invalid_token, unauthorized, forbidden,
+rate_limited (retry_after — сколько секунд ждать), server_error, network_error.
 
 Коды выхода: 0 — создан (с -n — план); 2 — ошибка во входных данных, до сети; 3 — нет токена
 или он отклонён; 7 — rate limit, повторы исчерпаны; 1 — прочие ошибки, в том числе

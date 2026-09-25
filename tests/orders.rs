@@ -127,6 +127,29 @@ fn order_lines_without_product_id_are_refused() {
     );
 }
 
+/// `product_id` числом, а не строкой (типичная ошибка при переносе значений из YML без кавычек):
+/// сообщение должно отличаться от «нет product_id».
+#[test]
+fn order_lines_numeric_product_id_is_refused() {
+    let server = MockServer::start(vec![]);
+    let mut args = CREATE.to_vec();
+    args.extend(["--data", "-"]);
+    let out = run(
+        &server,
+        &args,
+        r#"{"order_lines": [{"product_id": 444772}]}"#,
+    );
+    local_error(&server, &out, "invalid_attribute", "order_lines");
+    assert!(
+        out.error_json()["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("не строка"),
+        "{}",
+        out.error_json()
+    );
+}
+
 #[test]
 fn taken_number_points_to_update_and_retry_is_safe() {
     let server = MockServer::start(vec![Reply::json(

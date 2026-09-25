@@ -101,7 +101,32 @@ fn create_sends_flags_and_requires_nothing_else() {
     assert_eq!(
         server.requests()[0].json()["data"]["attributes"],
         json!({"external_id": "c-2"}),
-        "сервер не требует email и name (стейджинг, 2026-09-25)"
+        "сервер не требует email и name (стейджинг, 2026-09-25); external_id один хватает для CLI"
+    );
+}
+
+/// Без external_id, email и phone клиента не найти и не отличить от дубля — CLI отказывает до сети,
+/// хотя сам сервер создал бы его и без единого атрибута (стейджинг, 2026-09-25).
+#[test]
+fn create_needs_an_identity() {
+    let server = MockServer::start(vec![]);
+    local_error(
+        &server,
+        &run(&server, &["consumers", "create"], ""),
+        "missing_attribute",
+        "external_id",
+    );
+    local_error(
+        &server,
+        &run(&server, &["consumers", "create", "--name", "Анна"], ""),
+        "missing_attribute",
+        "external_id",
+    );
+    local_error(
+        &server,
+        &run(&server, &["consumers", "create", "--data", "-"], "{}"),
+        "missing_attribute",
+        "external_id",
     );
 }
 

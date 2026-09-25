@@ -1,6 +1,8 @@
 //! Клиенты (спека writes-and-exports §3): `get` — общий, в `records`; запись — `create` и `update`.
 //! Данные клиентов персональные: e-mail, телефон, имя.
 
+use serde_json::{Map, Value};
+
 use super::updates::{self, UpdateJob};
 use super::writes::{create_unique, prepare, write_operation};
 use super::{records, Ctx, Outcome};
@@ -8,6 +10,11 @@ use crate::cli::{ConsumerFields, ConsumersVerb, CreateConsumerArgs, UpdateConsum
 use crate::error::CliError;
 use crate::ops::write::{self, Flag};
 use crate::resources::{self, Verb};
+
+/// Клиент без хотя бы одного из них — не адресовать и не отличить от дубля: сервер создаёт клиента
+/// и без единого атрибута (стейджинг, 2026-09-25; спека writes-and-exports §9), но CLI требует один
+/// из этих трёх до сети.
+const IDENTITY: [&str; 3] = ["external_id", "email", "phone"];
 
 pub fn run(verb: ConsumersVerb, ctx: &Ctx) -> Result<Outcome, CliError> {
     match verb {
@@ -21,8 +28,9 @@ fn create(args: &CreateConsumerArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
     let (spec, path) = write_operation(&resources::CONSUMERS, Verb::Create)?;
     let flags = create_flags(args);
     // Сервер создаёт клиента без обязательных атрибутов, хотя спека требует email и name
-    // (стейджинг, 2026-09-25; спека writes-and-exports §9).
+    // (стейджинг, 2026-09-25; спека writes-and-exports §9); CLI требует хотя бы один из IDENTITY.
     let attributes = prepare(spec, &[], args.data.as_deref(), &flags, ctx)?;
+    require_identity(&attributes)?;
     create_unique(
         &resources::CONSUMERS,
         "external_id",
@@ -31,6 +39,18 @@ fn create(args: &CreateConsumerArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
         ctx,
     )
     .map_err(email_taken)
+}
+
+fn require_identity(attributes: &Map<String, Value>) -> Result<(), CliError> {
+    if IDENTITY.iter().any(|name| attributes.contains_key(*name)) {
+        return Ok(());
+    }
+    Err(CliError::usage(
+        "missing_attribute",
+        "у клиента нет ни external_id, ни e-mail, ни телефона: такого клиента не найти и не отличить от дубля",
+    )
+    .with_field("external_id")
+    .with_hint("передайте --external-id, --email или --phone (или ключ в --data)"))
 }
 
 fn update(args: &UpdateConsumerArgs, ctx: &Ctx) -> Result<Outcome, CliError> {

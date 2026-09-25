@@ -539,7 +539,9 @@ impl Drop for OrderConsumerCleanup {
         };
         let Some(consumer) = parsed["data"]["relationships"]["consumer"]["data"]["id"].as_str()
         else {
-            return;
+            return eprintln!(
+                "НЕ УДАЛЁН клиент заказа {number}: в ответе нет id клиента — удалите вручную"
+            );
         };
         let url = format!("{}/consumers/{consumer}", base_url());
         match authorized(ureq::delete(&url)).call() {

@@ -187,18 +187,17 @@ pub fn create_unique(
 
 /// Как проверить исход `request_outcome_unknown`: по внешнему id, если `get` его примет.
 fn retry_hint(resource: &Resource, key: &str, external_id: Option<&str>) -> String {
-    let one = resource.noun.one;
     match external_id {
         Some(id) if check_id(id, key).is_ok() => format!(
-            "повтор безопасен: второй {one} с тем же {key} сервер не создаст; проверить — aplaut {} get {}",
+            "повтор безопасен: дубль с тем же {key} сервер не создаст; проверить — aplaut {} get {}",
             resource.name,
             shell_word(id)
         ),
         Some(_) => format!(
-            "повтор безопасен: второй {one} с тем же {key} сервер не создаст; проверьте в личном кабинете"
+            "повтор безопасен: дубль с тем же {key} сервер не создаст; проверьте в личном кабинете"
         ),
         None => format!(
-            "проверьте в личном кабинете, прежде чем повторять: без {key} повтор создаст второй {one}"
+            "проверьте в личном кабинете, прежде чем повторять: без {key} повтор может создать дубль"
         ),
     }
 }
