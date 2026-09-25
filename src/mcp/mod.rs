@@ -1,6 +1,7 @@
 //! MCP-сервер `aplaut mcp` (спека mcp-server): stdio через `rmcp`. Каждый вызов инструмента —
 //! дочерний процесс того же бинаря с `--json` (M3). Async и `rmcp` — только в этом модуле (M4).
 
+pub mod invoke;
 pub mod tools;
 
 use std::ffi::OsString;
