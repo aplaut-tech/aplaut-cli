@@ -1,6 +1,6 @@
 //! Smoke против живого стенда; в обычный `cargo test` не входит (все тесты `#[ignore]`).
 //!
-//!   APLAUT_E2E_BASE_URL=https://api.staging-old.aplaut.net/v4 \
+//!   APLAUT_E2E_BASE_URL=https://<стенд>/v4 \
 //!   APLAUT_ACCESS_TOKEN_FILE=… cargo test --test e2e -- --ignored --test-threads=1
 //!
 //! Токен — из APLAUT_ACCESS_TOKEN_FILE или APLAUT_ACCESS_TOKEN; адрес стенда в коде не хранится.
