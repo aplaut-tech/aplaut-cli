@@ -1,7 +1,7 @@
 # Aplaut CLI
 
 Консольный клиент [Aplaut Platform API](https://aplaut.com/docs/api-references/platform/):
-выгрузка отзывов, товаров и вопросов для DWH, cron и агентов.
+выгрузка и запись отзывов, товаров, вопросов, клиентов и заказов — для DWH, cron и агентов.
 
 ## Установка
 

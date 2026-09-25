@@ -12,7 +12,7 @@ use crate::cli::{GlobalArgs, McpArgs};
 use crate::error::CliError;
 use crate::mcp::{self, tools, ServerSetup};
 
-const INSTRUCTIONS_HEAD: &str = "Aplaut Platform API: отзывы, товары, вопросы.";
+const INSTRUCTIONS_HEAD: &str = "Aplaut Platform API: отзывы, товары, вопросы, клиенты, заказы.";
 
 const INSTRUCTIONS_BODY: &str = "\
 Ответ инструмента: первый текстовый блок — JSON-конверт (ok, command, result или error, warnings), \
@@ -21,7 +21,8 @@ const INSTRUCTIONS_BODY: &str = "\
 https://github.com/aplaut-tech/aplaut-cli/blob/main/docs/automation.md
 Без filter сервер отдаёт только последние 30 дней (предупреждение default_filter). Выгрузка без \
 output_file — не больше 100 записей за вызов (max_records, по умолчанию 20); со state повторный вызов \
-отдаёт следующую порцию. Больше — в output_file.";
+отдаёт следующую порцию. Больше — в output_file.
+consumers_get и orders_get отдают персональные данные (e-mail, телефон, имя): не пересказывайте их без нужды.";
 
 pub fn run(args: &McpArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
     check_stdin_free(&ctx.global)?;
@@ -192,6 +193,13 @@ mod tests {
                 .all(|name| !read_only.contains(name.as_str())),
             "{read_only}"
         );
+    }
+
+    #[test]
+    fn instructions_warn_about_personal_data() {
+        let text = instructions(false, Ok(("default".into(), "https://x.test/v4".into())));
+        assert!(text.contains("персональные данные"), "{text}");
+        assert!(text.contains("клиенты, заказы"), "{text}");
     }
 
     #[test]

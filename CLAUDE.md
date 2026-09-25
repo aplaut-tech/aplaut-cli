@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Проект
 
 `aplaut` — консольный клиент Aplaut Platform API на Rust (бинарь `aplaut`, библиотека `aplaut_cli`):
-выгрузка и запись отзывов, товаров и вопросов для DWH, cron и агентов. Справка CLI, сообщения,
+выгрузка и запись отзывов, товаров, вопросов, клиентов и заказов для DWH, cron и агентов. Справка CLI, сообщения,
 документация и комментарии в коде — на русском; сообщения коммитов — на английском, conventional commits
 (`feat:`, `fix:`, `chore:`, `docs:`, `ci:`, `refactor:`, `test:`).
 
@@ -43,9 +43,14 @@ dist plan                                      # что соберёт рели�
   `spec_tables.rs`, доступ через `spec.rs`: фильтры и include scroll, include `get`, схемы тел записи.
   `resources.rs` — таблица «ресурс × глагол → операция API». Добавить ресурс = строка в `resources.rs`
   + вариант в `cli::Command`; `tests/spec_drift.rs` проверяет соответствие команд и операций спеки.
+  Поправки к спеке по наблюдённому поведению сервера — в `build.rs` (`WRITE_OPERATIONS`: `nullable`,
+  `ignored`, `create_only`; `GET_INCLUDE_OVERRIDES`).
 - **HTTP** (`http.rs`): синхронный `ureq`, один клиент на процесс. Троттлинг проактивный (2 запроса/с;
   scroll — 1 запрос в 2 с и 5 открытий в минуту на ключ). Повторы по политике `Replay`: POST
   повторяется, только если сервер точно не получил запрос, иначе `request_outcome_unknown`.
+- **update с upsert** (`commands/updates.rs`): у отзывов, вопросов, клиентов и заказов PUT создаёт
+  объект, если его нет, — `update` сначала делает `GET` (`not_found` без `--upsert`), затем PUT с
+  `Replay::Safe`; `created` — по 201. `create` с внешним id — `writes::create_unique`.
 - **Scroll** (`ops/scroll.rs`, `state.rs`): курсор не идемпотентен — перед продолжением стейт
   помечается `in_flight`. Стейт пишется атомарно и только в точках фиксации формата
   (`RecordSink::write_page` → `Commit::Durable`): at-least-once, хвост прошлой страницы отсекается по id.

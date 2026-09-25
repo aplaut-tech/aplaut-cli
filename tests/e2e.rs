@@ -4,7 +4,7 @@
 //!   APLAUT_ACCESS_TOKEN_FILE=… cargo test --test e2e -- --ignored --test-threads=1
 //!
 //! Токен — из APLAUT_ACCESS_TOKEN_FILE или APLAUT_ACCESS_TOKEN; адрес стенда в коде не хранится.
-//! Круги записи (`review_write_round_trip`, `product_write_round_trip`) создают и удаляют
+//! Круги записи (`review_*`, `product_*`, `question_*`, `consumer_*`, `order_*`) создают и удаляют
 //! тестовые объекты — только с APLAUT_E2E_WRITES=1.
 
 mod support;
@@ -18,6 +18,10 @@ fn base_url() -> String {
 }
 
 fn run(args: &[&str]) -> Output {
+    run_with_stdin(args, "")
+}
+
+fn run_with_stdin(args: &[&str], stdin: &str) -> Output {
     let home = TempDir::new("e2e");
     let base = base_url();
     let mut env: Vec<(String, String)> = vec![("APLAUT_BASE_URL".into(), base)];
@@ -31,7 +35,13 @@ fn run(args: &[&str]) -> Output {
         "задайте APLAUT_ACCESS_TOKEN_FILE или APLAUT_ACCESS_TOKEN"
     );
     let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-    aplaut(home.path(), args, &env, "")
+    aplaut(home.path(), args, &env, stdin)
+}
+
+/// Успешный вызов: последняя строка stdout — конверт (`--json`) или запись (`get`).
+fn json_line(out: &Output) -> serde_json::Value {
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    serde_json::from_str(out.stdout.trim_end()).unwrap_or_else(|e| panic!("{e}: {}", out.stdout))
 }
 
 #[test]
@@ -230,6 +240,230 @@ fn product_write_round_trip() {
     assert_eq!(record["attributes"]["price"], 2.0);
     assert_eq!(
         record["attributes"]["name"], "aplaut-cli test",
+        "PUT частичный"
+    );
+}
+
+/// Круг `reviews update` (спека writes-and-exports §10): `--upsert` создаёт → смена статуса → get:
+/// статус новый, текст прежний → update несуществующего без `--upsert` — код 5 → удалить в guard.
+#[test]
+#[ignore]
+fn review_update_round_trip() {
+    if !writes_enabled() {
+        return;
+    }
+    let external_id = format!("aplaut-cli-test-{}-ru", unix_seconds());
+    let _cleanup = Cleanup(format!("reviews/{external_id}"));
+    let body = "Тестовый отзыв aplaut-cli, будет удалён";
+    let created = json_line(&run(&[
+        "reviews",
+        "update",
+        &external_id,
+        "--rating",
+        "5",
+        "--body",
+        body,
+        "--author-name",
+        "aplaut-cli test",
+        "--state",
+        "waiting",
+        "--upsert",
+        "--json",
+    ]));
+    assert_eq!(created["result"]["created"], true);
+    let updated = json_line(&run(&[
+        "reviews",
+        "update",
+        &external_id,
+        "--state",
+        "banned",
+        "--json",
+    ]));
+    assert_eq!(updated["result"]["created"], false);
+    let record = json_line(&run(&["reviews", "get", &external_id, "--format", "jsonl"]));
+    assert_eq!(record["attributes"]["state"], "banned");
+    assert_eq!(record["attributes"]["body"], body, "PUT частичный");
+    let missing = format!("{external_id}-missing");
+    // Если R3 сломан, PUT создал бы отзыв — guard уберёт и его.
+    let _missing = Cleanup(format!("reviews/{missing}"));
+    let out = run(&["reviews", "update", &missing, "--state", "banned"]);
+    assert_eq!(out.code, 5, "{}", out.stderr);
+}
+
+/// Круг вопросов: вопрос о тестовом товаре → смена статуса без --product-id (CLI подставляет его:
+/// без него сервер отвечает 404, стейджинг 2026-09-25) → get → удалить вопрос и товар.
+#[test]
+#[ignore]
+fn question_write_round_trip() {
+    if !writes_enabled() {
+        return;
+    }
+    let stamp = unix_seconds();
+    let product = format!("aplaut-cli-test-{stamp}-p");
+    let question = format!("aplaut-cli-test-{stamp}-q");
+    // Guard'ы удаляются в обратном порядке: сначала вопрос, потом товар.
+    let _product = Cleanup(format!("products/{product}"));
+    let _question = Cleanup(format!("questions/{question}"));
+    json_line(&run(&[
+        "products",
+        "create",
+        "--external-id",
+        &product,
+        "--name",
+        "aplaut-cli test",
+        "--url",
+        "https://example.com/aplaut-cli-test",
+        "--available",
+        "false",
+        "--json",
+    ]));
+    json_line(&run(&[
+        "questions",
+        "create",
+        "--external-id",
+        &question,
+        "--text",
+        "Тестовый вопрос aplaut-cli, будет удалён?",
+        "--author-name",
+        "aplaut-cli test",
+        "--state",
+        "waiting",
+        "--product-id",
+        &product,
+        "--json",
+    ]));
+    let updated = json_line(&run(&[
+        "questions",
+        "update",
+        &question,
+        "--state",
+        "banned",
+        "--json",
+    ]));
+    assert_eq!(
+        updated["result"]["request"]["body"]["data"]["attributes"]["product_id"],
+        product.as_str()
+    );
+    let record = json_line(&run(&["questions", "get", &question, "--format", "jsonl"]));
+    assert_eq!(
+        (
+            record["attributes"]["state"].as_str(),
+            record["attributes"]["product_id"].as_str()
+        ),
+        (Some("banned"), Some(product.as_str()))
+    );
+}
+
+/// Круг клиентов: создать (e-mail на example.com) → сменить имя и отписку → get → e-mail без
+/// --upsert — код 2 → удалить.
+#[test]
+#[ignore]
+fn consumer_write_round_trip() {
+    if !writes_enabled() {
+        return;
+    }
+    let stamp = unix_seconds();
+    let external_id = format!("aplaut-cli-test-{stamp}-c");
+    let email = format!("aplaut-cli-test+{stamp}@example.com");
+    let _cleanup = Cleanup(format!("consumers/{external_id}"));
+    json_line(&run(&[
+        "consumers",
+        "create",
+        "--external-id",
+        &external_id,
+        "--email",
+        &email,
+        "--name",
+        "aplaut-cli test",
+        "--json",
+    ]));
+    json_line(&run(&[
+        "consumers",
+        "update",
+        &external_id,
+        "--first-name",
+        "Тест",
+        "--unsubscribed",
+        "true",
+        "--json",
+    ]));
+    let record = json_line(&run(&[
+        "consumers",
+        "get",
+        &external_id,
+        "--format",
+        "jsonl",
+    ]));
+    assert_eq!(
+        (
+            record["attributes"]["email"].as_str(),
+            record["attributes"]["first_name"].as_str(),
+            record["attributes"]["unsubscribed"].as_bool()
+        ),
+        (Some(email.as_str()), Some("Тест"), Some(true))
+    );
+    let out = run(&[
+        "consumers",
+        "update",
+        &external_id,
+        "--email",
+        "other@example.com",
+    ]);
+    assert_eq!(out.code, 2, "{}", out.stderr);
+}
+
+/// Круг заказов: создать со строкой → get с include=consumer (заказ создаёт клиента — удалить и
+/// его) → сменить имя → get: имя новое, строки прежние → удалить заказ и клиента.
+#[test]
+#[ignore]
+fn order_write_round_trip() {
+    if !writes_enabled() {
+        return;
+    }
+    let stamp = unix_seconds();
+    let number = format!("aplaut-cli-test-{stamp}-o");
+    let line_product = format!("aplaut-cli-test-{stamp}-p");
+    let _order = Cleanup(format!("orders/{number}"));
+    let lines = serde_json::json!({"order_lines": [
+        {"product_id": line_product, "name": "aplaut-cli test", "price": 1}
+    ]})
+    .to_string();
+    let email = format!("aplaut-cli-test+{stamp}-o@example.com");
+    json_line(&run_with_stdin(
+        &[
+            "orders",
+            "create",
+            "--number",
+            &number,
+            "--consumer-email",
+            &email,
+            "--consumer-name",
+            "aplaut-cli test",
+            "--data",
+            "-",
+            "--json",
+        ],
+        &lines,
+    ));
+    let raw = json_line(&run(&["orders", "get", &number, "--include", "consumer"]));
+    let consumer = raw["data"]["relationships"]["consumer"]["data"]["id"]
+        .as_str()
+        .expect("клиент заказа")
+        .to_string();
+    let _consumer = Cleanup(format!("consumers/{consumer}"));
+    json_line(&run(&[
+        "orders",
+        "update",
+        &number,
+        "--consumer-name",
+        "aplaut-cli test 2",
+        "--json",
+    ]));
+    let record = json_line(&run(&["orders", "get", &number, "--format", "jsonl"]));
+    assert_eq!(record["attributes"]["consumer_name"], "aplaut-cli test 2");
+    assert_eq!(
+        record["attributes"]["order_lines"][0]["product_id"],
+        line_product.as_str(),
         "PUT частичный"
     );
 }
