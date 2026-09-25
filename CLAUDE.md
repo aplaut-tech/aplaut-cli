@@ -52,8 +52,13 @@ dist plan                                      # что соберёт рели�
 - **Форматы** (`output`): `raw` — тела страниц как есть, `jsonl` — запись со связями из `included`,
   `csv` — проекция `output/tabular` с `--fields`.
 - **Время** — через трейт `Clock` (`clock.rs`): тесты ретраев и троттлинга без реального ожидания.
-- **Async** — только `update.rs` (`self update` через `axoupdater`, tokio current-thread). Остальной
-  CLI синхронный и crash-only, без обработчиков сигналов.
+- **Async** — только `update.rs` (`self update` через `axoupdater`) и `src/mcp` (tokio current-thread).
+  Остальной CLI синхронный и crash-only, без обработчиков сигналов.
+- **MCP** (`src/mcp`, `aplaut mcp`): сервер на `rmcp` (stdio). Каталог инструментов выводится из
+  `resources::ALL` × `Verb` (`mcp/tools.rs`), схемы — из спеки, описания — из справки clap. Каждый
+  вызов — дочерний процесс того же бинаря с `--json --no-input` (`mcp/invoke.rs`); значения — одним
+  токеном `--flag=value`, id — после `--`. Новая команда CLI должна стать инструментом или попасть в
+  `MCP_EXCLUDED` — иначе падает страж в `mcp/tools.rs`. Как добавить инструмент — `docs/mcp.md`.
 
 ## Контракты, которые нельзя сломать
 

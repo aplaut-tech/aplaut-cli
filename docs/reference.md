@@ -12,6 +12,7 @@ JSON, ошибками и кодами выхода — `aplaut <ресурс> <
 | `products` — товары | [`scroll`](#scroll), [`get`](#get), [`create`](#products-create), [`update`](#products-update) |
 | `questions` — вопросы | [`scroll`](#scroll), [`get`](#get) |
 | [`self`](#self) — сам aplaut | [`update`](#self-update) |
+| [`mcp`](#mcp) — MCP-сервер для агентов | — (`aplaut mcp`) |
 
 ## Глобальные флаги
 
@@ -455,3 +456,19 @@ aplaut self update [-n]
 | `NO_COLOR`, `APLAUT_NO_COLOR` | без цвета |
 | `VISUAL`, `EDITOR` | редактор для `profile edit` |
 | `XDG_CONFIG_HOME` | где искать каталог `aplaut` вместо `~/.config` |
+
+## mcp
+
+```text
+aplaut mcp [--allow-writes]
+```
+
+MCP-сервер через stdin/stdout: команды aplaut — инструментами для агентов. Глобальные флаги
+(`--profile`, `--base-url`, `--token-file`, `--timeout`, `--max-retries`, `--verbose`) передаются
+каждому вызову; `--token-stdin` и `--token-file -` недоступны — stdin занят протоколом.
+
+| Флаг | Что делает |
+|---|---|
+| `--allow-writes` | открыть запись: `reviews_create`, `reviews_comment`, `products_create`, `products_update` |
+
+Подключение, инструменты и выгрузка — в [mcp.md](mcp.md).

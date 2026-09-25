@@ -59,6 +59,7 @@ aplaut self update -n     # только проверить, есть ли но�
 
 - [Справочник команд](docs/reference.md) — ресурсы, действия, флаги и примеры.
 - [Для агентов и скриптов](docs/automation.md) — `--json`, коды выхода, каталог ошибок и предупреждений.
+- [MCP-сервер](docs/mcp.md) — `aplaut mcp`: работа через агента (Claude Code, Claude Desktop, Cursor).
 - `aplaut <ресурс> <действие> --help` — справка по одной команде, с полями JSON.
 - [Разработка](CONTRIBUTING.md).
 
