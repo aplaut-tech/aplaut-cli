@@ -45,10 +45,14 @@ claude mcp add aplaut-prod -- aplaut mcp --profile prod
 | `reviews_get`, `products_get`, `questions_get` | `<ресурс> get` | всегда |
 | `reviews_create`, `products_create` | `<ресурс> create` | `--allow-writes` |
 | `reviews_comment` | `reviews comment` | `--allow-writes` |
-| `products_update` | `products update` | `--allow-writes` |
+| `reviews_update`, `products_update` | `<ресурс> update` | `--allow-writes` |
 
 Параметры повторяют флаги команды (`max_records` ↔ `--max-records`), атрибуты записи — поля схемы
 спеки. Формат по умолчанию — `jsonl`: запись со связями из `include` одной строкой.
+
+`update` отзывов (и других ресурсов, где API на `PUT` с неизвестным id создаёт объект) сначала
+проверяет, что объект есть: нет — `not_found`, ничего не создано. Параметр `upsert: true` разрешает
+создать объект с внешним id из `id`; в `result` — `created: true`.
 
 Ответ: первый текстовый блок — JSON-конверт, как у `--json`; второй — данные, если они есть. При
 ошибке `isError: true`, в конверте — `error.code`, `hint`, `retryable`.

@@ -298,6 +298,13 @@ fn write_properties(
         "dry_run".into(),
         json!({"type": "boolean", "description": help(leaf, "dry_run")}),
     );
+    // `update` с upsert (спека writes-and-exports R3): флаг команды — параметр инструмента.
+    if leaf.get_arguments().any(|a| a.get_long() == Some("upsert")) {
+        p.insert(
+            "upsert".into(),
+            json!({"type": "boolean", "description": help(leaf, "upsert")}),
+        );
+    }
     (p, spec.attributes.iter().map(|a| a.name).collect())
 }
 
@@ -530,11 +537,32 @@ mod tests {
         for tool in catalog() {
             for attribute in &tool.attributes {
                 assert!(
-                    !["id", "review_id", "dry_run"].contains(attribute),
+                    !["id", "review_id", "dry_run", "upsert"].contains(attribute),
                     "{}: атрибут {attribute} совпал с параметром инструмента",
                     tool.name
                 );
             }
+        }
+    }
+
+    #[test]
+    fn upsert_is_a_parameter_of_update_tools_with_the_flag() {
+        let catalog = catalog();
+        let update = find(&catalog, "reviews_update");
+        assert_eq!(update.properties()["upsert"]["type"], "boolean");
+        assert!(
+            update.properties()["upsert"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("создать"),
+            "описание — из справки флага"
+        );
+        assert_eq!(update.hints, OVERWRITES);
+        for name in ["reviews_create", "products_update"] {
+            assert!(
+                find(&catalog, name).properties().get("upsert").is_none(),
+                "{name}"
+            );
         }
     }
 

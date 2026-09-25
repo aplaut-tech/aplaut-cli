@@ -464,6 +464,9 @@ fn write_flags(
     if boolean(args, "dry_run")? {
         argv.push("--dry-run".into());
     }
+    if boolean(args, "upsert")? {
+        argv.push("--upsert".into());
+    }
     Ok(Value::Object(data).to_string())
 }
 
@@ -727,6 +730,30 @@ mod tests {
         assert_eq!(&args[args.len() - 2..], ["--", "p1"]);
         let data: Value = serde_json::from_str(plan.stdin.as_deref().unwrap()).unwrap();
         assert_eq!(data, json!({"price": null}), "null очищает атрибут");
+    }
+
+    #[test]
+    fn upsert_is_a_flag_not_an_attribute() {
+        let plan = planned(
+            "reviews_update",
+            json!({"id": "crm-1", "state": "banned", "upsert": true}),
+        )
+        .unwrap();
+        assert_eq!(
+            argv(&plan),
+            [
+                "reviews",
+                "update",
+                "--data=-",
+                "--upsert",
+                "--json",
+                "--no-input",
+                "--",
+                "crm-1"
+            ]
+        );
+        let data: Value = serde_json::from_str(plan.stdin.as_deref().unwrap()).unwrap();
+        assert_eq!(data, json!({"state": "banned"}));
     }
 
     #[test]

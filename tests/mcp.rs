@@ -501,6 +501,38 @@ fn create_sends_attributes_unchanged() {
     assert_eq!(client.finish(), 0);
 }
 
+/// Review Focus: `upsert: true` доходит до CLI флагом — GET не делается, PUT создаёт отзыв.
+#[test]
+fn update_tool_passes_upsert_to_the_cli() {
+    let home = TempDir::new("mcp-upsert");
+    let server = MockServer::start(vec![created("r9")]);
+    let mut client = served(home.path(), &server, &["--allow-writes"]);
+    let response = client.call(
+        "reviews_update",
+        json!({"id": "crm-1", "rating": 5, "body": "Спасибо!", "upsert": true}),
+    );
+    assert!(!is_error(&response), "{response}");
+    let env = envelope(&response);
+    assert_eq!(
+        (env["command"].as_str(), env["result"]["created"].as_bool()),
+        (Some("reviews.update"), Some(true))
+    );
+    let requests = server.requests();
+    assert_eq!(
+        (
+            requests.len(),
+            requests[0].method.as_str(),
+            requests[0].path.as_str()
+        ),
+        (1, "PUT", "/v4/reviews/crm-1")
+    );
+    assert_eq!(
+        requests[0].json()["data"]["attributes"],
+        json!({"rating": 5, "body": "Спасибо!"})
+    );
+    assert_eq!(client.finish(), 0);
+}
+
 #[test]
 fn write_tools_are_absent_without_allow_writes() {
     let home = TempDir::new("mcp-no-writes");
