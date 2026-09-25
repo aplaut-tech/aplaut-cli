@@ -10,7 +10,7 @@ use super::{base_url_for, Ctx, Outcome};
 use crate::auth;
 use crate::cli::{GlobalArgs, McpArgs};
 use crate::error::CliError;
-use crate::mcp::{self, ServerSetup};
+use crate::mcp::{self, tools, ServerSetup};
 
 const INSTRUCTIONS_HEAD: &str = "Aplaut Platform API: отзывы, товары, вопросы.";
 
@@ -100,10 +100,13 @@ fn instructions(allow_writes: bool, target: Result<(String, String), CliError>) 
         ),
     };
     let mode = if allow_writes {
-        "Запись включена: reviews_create, reviews_comment, products_create, products_update; \
-         проверяйте запрос параметром dry_run, прежде чем отправлять."
+        format!(
+            "Запись включена: {}; проверяйте запрос параметром dry_run, прежде чем отправлять.",
+            tools::names(true).join(", ")
+        )
     } else {
         "Запись выключена (сервер запущен без --allow-writes): только чтение и выгрузка."
+            .to_string()
     };
     format!("{INSTRUCTIONS_HEAD} {target} {mode}\n{INSTRUCTIONS_BODY}")
 }
@@ -114,6 +117,7 @@ mod tests {
 
     use super::*;
     use crate::cli::Cli;
+    use crate::mcp::tools;
 
     fn global(args: &[&str]) -> GlobalArgs {
         let mut full = vec!["aplaut", "mcp"];
@@ -172,5 +176,35 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("Запись выключена"), "{text}");
+    }
+
+    #[test]
+    fn instructions_list_write_tools_from_the_catalog() {
+        let target = || Ok(("default".to_string(), "https://x.test/v4".to_string()));
+        let writes = instructions(true, target());
+        for name in tools::names(true) {
+            assert!(writes.contains(&name), "нет {name}: {writes}");
+        }
+        let read_only = instructions(false, target());
+        assert!(
+            tools::names(true)
+                .iter()
+                .all(|name| !read_only.contains(name.as_str())),
+            "{read_only}"
+        );
+    }
+
+    #[test]
+    fn help_lists_tools_from_the_catalog() {
+        let mut root = Cli::command_with_dynamic_help();
+        root.build();
+        let help = root
+            .find_subcommand_mut("mcp")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+        for name in tools::names(false).iter().chain(&tools::names(true)) {
+            assert!(help.contains(name.as_str()), "нет {name}");
+        }
     }
 }

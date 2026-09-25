@@ -469,6 +469,6 @@ MCP-сервер через stdin/stdout: команды aplaut — инстру
 
 | Флаг | Что делает |
 |---|---|
-| `--allow-writes` | открыть запись: `reviews_create`, `reviews_comment`, `products_create`, `products_update` |
+| `--allow-writes` | открыть запись: инструменты `create`, `update` и `comment` (список — `aplaut mcp --help`) |
 
 Подключение, инструменты и выгрузка — в [mcp.md](mcp.md).

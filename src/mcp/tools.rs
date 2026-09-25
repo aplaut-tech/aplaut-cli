@@ -148,6 +148,22 @@ pub fn enabled(allow_writes: bool) -> Vec<ToolDef> {
         .collect()
 }
 
+/// Имена инструментов (`reviews_create`) по таблице ресурсов, без дерева clap: список нужен и
+/// справке `aplaut mcp` (она сама часть дерева), и `instructions` сервера (спека writes-and-exports
+/// R12).
+pub fn names(writes: bool) -> Vec<String> {
+    resources::ALL
+        .iter()
+        .flat_map(|resource| {
+            resource
+                .verbs
+                .iter()
+                .filter(move |verb| verb.writes() == writes)
+                .map(move |verb| format!("{}_{}", resource.name, verb.name()))
+        })
+        .collect()
+}
+
 /// Вид глагола → схема, аннотации (M8): новый `Verb` не соберётся без ветки здесь.
 fn tool(
     resource: &'static Resource,
@@ -375,6 +391,20 @@ mod tests {
             } else {
                 out.push(path);
             }
+        }
+    }
+
+    /// Списки для справки `aplaut mcp` и `instructions` — те же, что каталог (R12).
+    #[test]
+    fn names_by_mode_match_the_catalog() {
+        let catalog = catalog();
+        for writes in [false, true] {
+            let expected: Vec<String> = catalog
+                .iter()
+                .filter(|t| t.writes() == writes)
+                .map(|t| t.name.clone())
+                .collect();
+            assert_eq!(names(writes), expected, "writes: {writes}");
         }
     }
 

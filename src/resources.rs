@@ -22,6 +22,14 @@ impl Verb {
         }
     }
 
+    /// Глагол меняет данные в API: инструмент MCP — только с `--allow-writes` (M5).
+    pub fn writes(self) -> bool {
+        match self {
+            Verb::Scroll | Verb::Get => false,
+            Verb::Create | Verb::Comment | Verb::Update => true,
+        }
+    }
+
     /// Метод и шаблон пути операции в `spec/api.yaml`.
     pub fn operation(self, resource: &Resource) -> (&'static str, String) {
         match self {

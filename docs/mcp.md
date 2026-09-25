@@ -72,7 +72,8 @@ claude mcp add aplaut-prod -- aplaut mcp --profile prod
 
 - Новый ресурс со знакомыми глаголами (`scroll`, `get`, `create`, `comment`, `update`) — строка в
   `src/resources.rs` и вариант `cli::Command`, как для CLI. Инструменты появятся сами: схемы — из
-  `spec/api.yaml`, описания — из справки clap. Добавьте имена в ожидаемые списки `tests/mcp.rs`.
+  `spec/api.yaml`, описания — из справки clap. Списки инструментов в справке `aplaut mcp` и в
+  `instructions` сервера строятся из той же таблицы. Добавьте имена в ожидаемые списки `tests/mcp.rs`.
 - Новый вид глагола — вариант `Verb`; компилятор потребует ветку в `tool()` в `src/mcp/tools.rs`:
   параметры, argv (`src/mcp/invoke.rs`), аннотации.
 - Команда не про ресурс — по умолчанию в `MCP_EXCLUDED` с причиной; тест
