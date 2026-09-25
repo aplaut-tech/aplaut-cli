@@ -209,7 +209,8 @@ fn read_only_server_lists_scroll_and_get() {
             "products_get",
             "questions_scroll",
             "questions_get",
-            "consumers_get"
+            "consumers_get",
+            "orders_get"
         ]
     );
     assert_eq!(
@@ -248,7 +249,10 @@ fn allow_writes_adds_write_tools() {
             "questions_update",
             "consumers_get",
             "consumers_create",
-            "consumers_update"
+            "consumers_update",
+            "orders_get",
+            "orders_create",
+            "orders_update"
         ]
     );
     assert_eq!(

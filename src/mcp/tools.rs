@@ -436,7 +436,10 @@ mod tests {
                 "questions_update",
                 "consumers_get",
                 "consumers_create",
-                "consumers_update"
+                "consumers_update",
+                "orders_get",
+                "orders_create",
+                "orders_update"
             ]
         );
         assert!(enabled(false).iter().all(|t| !t.writes()));
@@ -621,10 +624,9 @@ mod tests {
     /// Спека writes-and-exports §6: get клиентов и заказов отдаёт персональные данные — модель
     /// должна это видеть в описании.
     #[test]
-    #[allow(clippy::single_element_loop)] // список пополнится в task-7 (orders_get)
     fn personal_data_is_named_in_get_tools() {
         let catalog = catalog();
-        for name in ["consumers_get"] {
+        for name in ["consumers_get", "orders_get"] {
             let tool = find(&catalog, name);
             assert!(
                 tool.description.contains("персональные данные"),
@@ -633,5 +635,17 @@ mod tests {
             );
             assert_eq!(tool.hints, READ_ONLY, "{name}");
         }
+    }
+
+    /// Спека writes-and-exports §4: `order_lines` сервер заменяет целиком — это в описании инструмента.
+    #[test]
+    fn orders_update_says_lines_are_replaced() {
+        let catalog = catalog();
+        let tool = find(&catalog, "orders_update");
+        assert!(
+            tool.description.contains("order_lines заменяются целиком"),
+            "{}",
+            tool.description
+        );
     }
 }

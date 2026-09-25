@@ -107,7 +107,18 @@ pub static CONSUMERS: Resource = Resource {
     },
 };
 
-pub static ALL: &[&Resource] = &[&REVIEWS, &PRODUCTS, &QUESTIONS, &CONSUMERS];
+/// Заказы: scroll API не поддерживает; внешний id — `number` (спека writes-and-exports §4).
+pub static ORDERS: Resource = Resource {
+    name: "orders",
+    records_type: "orders",
+    verbs: &[Verb::Get, Verb::Create, Verb::Update],
+    noun: Noun {
+        one: "заказ",
+        genitive: "заказа",
+    },
+};
+
+pub static ALL: &[&Resource] = &[&REVIEWS, &PRODUCTS, &QUESTIONS, &CONSUMERS, &ORDERS];
 
 /// Команды без операции Platform API: локальные файлы, самообновление (`self update` ходит в
 /// GitHub Releases) и MCP-сервер (его инструменты вызывают остальные команды).

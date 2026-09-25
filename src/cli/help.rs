@@ -103,11 +103,12 @@ pub(super) const GET_AFTER_LONG_HELP: &str = "\
   aplaut reviews get crm-4211 --include comments --format jsonl --json
 
 ID — внутренний идентификатор или external_id (без «.» и «/»: API такие id в пути обрезает
-или не находит). --include по ресурсу (проверяется до запроса):
+или не находит; у заказа — number). --include по ресурсу (проверяется до запроса):
   reviews    author, product, comments, state_changes
   products   reviews_summary_item, reviews, questions, brand, category
   questions  author, product, answers
   consumers  reviews, questions, orders
+  orders     consumer
 
 Форматы — как у scroll, для одной записи: raw — тело ответа одной строкой; jsonl — запись
 с подставленными объектами --include; csv — заголовок и строка (--fields — по правилам scroll).

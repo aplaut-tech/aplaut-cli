@@ -188,3 +188,78 @@ rate_limited (retry_after — сколько секунд ждать), server_er
 Коды выхода: 0 — обновлён или создан (с -n — план); 2 — ошибка во входных данных, до сети;
 3 — нет токена или он отклонён; 5 — клиента нет (без --upsert); 7 — rate limit, повторы
 исчерпаны; 1 — прочие ошибки.";
+
+pub(super) const ORDERS_CREATE_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut orders create --number 31337 --consumer-email anna@example.com --consumer-name \"Анна\" -n
+
+  # Строки заказа — только через --data: массив объектов удобнее JSON, чем флагами.
+  echo '{\"order_lines\":[{\"product_id\":\"444772\",\"name\":\"Диск\",\"price\":5990}],\"details\":{\"region\":74}}' \\
+    | aplaut orders create --number 31337 --consumer-email anna@example.com --data - --json
+
+Данные клиента в заказе — персональные: e-mail, телефон, имя.
+Атрибуты — из схемы тела POST /orders в спеке; флаги перекрывают одноимённые ключи --data.
+Обязательны number (внешний id заказа) и хотя бы одно из consumer_email, consumer_phone (так
+проверяет сервер; спека требует ещё consumer_name и order_lines). Строка заказа —
+{\"product_id\",\"name\",\"price\"}, product_id обязателен: сервер строку без него принимает молча, CLI —
+нет. С новым e-mail или телефоном сервер создаёт и клиента. details — через --data.
+С -n (--dry-run) токен проверяется, но запросов нет.
+
+Повторы: CLI повторяет запрос сам, только если сервер его точно не обработал. После
+request_outcome_unknown повтор безопасен: второй заказ с тем же number сервер не создаст (422, is
+already taken); проверить — aplaut orders get <number>.
+
+JSON (--json):
+  {\"ok\":true,\"command\":\"orders.create\",\"cli_version\":…,\"dry_run\":false,
+   \"result\":{\"request\":{\"method\":\"POST\",\"path\":\"/orders\",
+   \"body\":{\"data\":{\"type\":\"orders\",\"attributes\":{…}}}},
+   \"created\":{\"id\",\"type\":\"orders\",\"attributes\":{…}}},\"warnings\":[]}
+  С -n — тот же request, \"created\":null и \"dry_run\":true.
+
+Ошибки: unknown_attribute (в hint — допустимые), invalid_attribute (в том числе строка order_lines
+без product_id), missing_attribute, invalid_data, stdin_conflict, stdin_is_terminal,
+validation_failed (422; number is already taken — заказ уже есть, в hint — orders update),
+request_outcome_unknown, bad_response, no_token, invalid_token, unauthorized, forbidden,
+rate_limited (retry_after — сколько секунд ждать), server_error, network_error.
+
+Коды выхода: 0 — создан (с -n — план); 2 — ошибка во входных данных, до сети; 3 — нет токена
+или он отклонён; 7 — rate limit, повторы исчерпаны; 1 — прочие ошибки, в том числе
+request_outcome_unknown (повтор безопасен).";
+
+pub(super) const ORDERS_UPDATE_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut orders update 31337 --consumer-name \"Анна Петрова\"
+  aplaut orders update 31337 --consumer-phone \"+7 900 000-00-00\" -n    # проверить, что заказ есть, и показать запрос
+
+  # Корзина заменяется целиком: передайте все строки; details сливаются с текущими.
+  echo '{\"order_lines\":[{\"product_id\":\"444772\",\"name\":\"Диск\",\"price\":5490}],\"details\":{\"payment_status\":\"paid\"}}' \\
+    | aplaut orders update 31337 --data - --json
+
+Данные клиента в заказе — персональные: e-mail, телефон, имя.
+ID — внутренний идентификатор или номер заказа (number; без «.» и «/»). Меняются только переданные
+атрибуты: order_lines сервер заменяет целиком, details сливает, null очищает атрибут. Сначала CLI
+проверяет запросом GET, что заказ есть: API на PUT с неизвестным id создаёт новый заказ. Нет заказа —
+not_found (код 5), ничего не создано; --upsert пропускает проверку и создаёт заказ с number = ID
+(нужен e-mail или телефон клиента). number не меняется (сервер его игнорирует) — отвергается до
+отправки. Смена consumer_email меняет атрибут заказа, связанный клиент остаётся прежним.
+С -n (--dry-run) токен и наличие заказа проверяются, PUT не отправляется.
+
+Повторы: правка идемпотентна и повторяется после таймаута и 5xx, как чтение.
+
+JSON (--json):
+  {\"ok\":true,\"command\":\"orders.update\",\"cli_version\":…,\"dry_run\":false,
+   \"result\":{\"request\":{\"method\":\"PUT\",\"path\":\"/orders/<id>\",
+   \"body\":{\"data\":{\"type\":\"orders\",\"attributes\":{…}}}},
+   \"updated\":{\"id\",\"type\":\"orders\",\"attributes\":{…}},\"created\":false},\"warnings\":[]}
+  created: true — заказ создан этим вызовом (--upsert, ответ 201; после повтора — false).
+  С -n — тот же request, \"updated\":null, \"exists\":true|false и \"dry_run\":true.
+
+Ошибки: invalid_id, nothing_to_update, unknown_attribute, invalid_attribute (в том числе number и
+строка order_lines без product_id), invalid_data, stdin_conflict, stdin_is_terminal, not_found
+(заказа нет, без --upsert), validation_failed (422), bad_response, no_token, invalid_token,
+unauthorized, forbidden, rate_limited (retry_after — сколько секунд ждать), server_error,
+network_error, timeout.
+
+Коды выхода: 0 — обновлён или создан (с -n — план); 2 — ошибка во входных данных, до сети;
+3 — нет токена или он отклонён; 5 — заказа нет (без --upsert); 7 — rate limit, повторы
+исчерпаны; 1 — прочие ошибки.";

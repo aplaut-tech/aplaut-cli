@@ -8,7 +8,8 @@ use clap::{Args, Subcommand};
 use super::help::{GET_AFTER_LONG_HELP, LEAF_AFTER_HELP};
 use super::help_writes::{
     CONSUMERS_CREATE_AFTER_LONG_HELP, CONSUMERS_UPDATE_AFTER_LONG_HELP,
-    QUESTIONS_CREATE_AFTER_LONG_HELP, QUESTIONS_UPDATE_AFTER_LONG_HELP,
+    ORDERS_CREATE_AFTER_LONG_HELP, ORDERS_UPDATE_AFTER_LONG_HELP, QUESTIONS_CREATE_AFTER_LONG_HELP,
+    QUESTIONS_UPDATE_AFTER_LONG_HELP,
 };
 use super::{DryRun, GetArgs, RecordsVerb};
 
@@ -171,6 +172,59 @@ pub struct UpdateConsumerArgs {
     pub id: String,
     #[command(flatten)]
     pub fields: ConsumerFields,
+    #[command(flatten)]
+    pub input: UpdateInput,
+}
+
+/// Заказы: чтение одной записи и запись (спека writes-and-exports §4); scroll у API нет.
+#[derive(Debug, Subcommand)]
+pub enum OrdersVerb {
+    /// Один заказ по внутреннему id или номеру (GET /orders/{id}): персональные данные клиента — e-mail, телефон, имя
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = GET_AFTER_LONG_HELP)]
+    Get(GetArgs),
+    /// Создать заказ (POST /orders): номер и e-mail или телефон клиента; строки заказа — в --data
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = ORDERS_CREATE_AFTER_LONG_HELP)]
+    Create(CreateOrderArgs),
+    /// Изменить заказ (PUT /orders/{id}): меняются только переданные атрибуты, order_lines заменяются целиком
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = ORDERS_UPDATE_AFTER_LONG_HELP)]
+    Update(UpdateOrderArgs),
+}
+
+/// Контакт клиента в заказе, общий для create и update. Строки заказа — только через `--data`: для
+/// массива объектов флаг хуже JSON.
+#[derive(Debug, Clone, Args)]
+pub struct OrderFields {
+    /// Имя клиента
+    #[arg(long, value_name = "TEXT")]
+    pub consumer_name: Option<String>,
+    /// E-mail клиента
+    #[arg(long, value_name = "EMAIL")]
+    pub consumer_email: Option<String>,
+    /// Телефон клиента
+    #[arg(long, value_name = "PHONE")]
+    pub consumer_phone: Option<String>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct CreateOrderArgs {
+    /// Номер заказа — его внешний id: по нему get найдёт заказ, а повтор не создаст второй; обязателен
+    #[arg(long, value_name = "ID")]
+    pub number: Option<String>,
+    #[command(flatten)]
+    pub fields: OrderFields,
+    /// Атрибуты JSON-объектом из файла (`-` — из stdin); флаги перекрывают его ключи
+    #[arg(long, value_name = "FILE|-")]
+    pub data: Option<PathBuf>,
+    #[command(flatten)]
+    pub dry: DryRun,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct UpdateOrderArgs {
+    /// Заказ: внутренний идентификатор или номер (number)
+    pub id: String,
+    #[command(flatten)]
+    pub fields: OrderFields,
     #[command(flatten)]
     pub input: UpdateInput,
 }

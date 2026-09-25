@@ -12,6 +12,7 @@ JSON, ошибками и кодами выхода — `aplaut <ресурс> <
 | `products` — товары | [`scroll`](#scroll), [`get`](#get), [`create`](#products-create), [`update`](#products-update) |
 | `questions` — вопросы | [`scroll`](#scroll), [`get`](#get), [`create`](#questions-create), [`update`](#questions-update) |
 | `consumers` — клиенты (персональные данные) | [`get`](#get), [`create`](#consumers-create), [`update`](#consumers-update) |
+| `orders` — заказы (персональные данные клиента) | [`get`](#get), [`create`](#orders-create), [`update`](#orders-update) |
 | [`self`](#self) — сам aplaut | [`update`](#self-update) |
 | [`mcp`](#mcp) — MCP-сервер для агентов | — (`aplaut mcp`) |
 
@@ -191,7 +192,7 @@ GUI-редактор должен ждать, пока вы закроете ф�
 ## Чтение
 
 У `reviews`, `products` и `questions` есть `scroll` (выгрузка обходом) и `get` (одна запись), у
-`consumers` — только `get`; флаги у них общие.
+`consumers` и `orders` — только `get`; флаги у них общие.
 
 ### scroll
 
@@ -263,16 +264,18 @@ aplaut reviews scroll --filter 'updated_at:gte:2024-01-01T00:00:00Z,rating:in:4|
 ### get
 
 ```text
-aplaut <reviews|products|questions|consumers> get <ID> [--include REL,…] [--format raw|jsonl|csv] [--fields COL,…]
+aplaut <reviews|products|questions|consumers|orders> get <ID> [--include REL,…] [--format raw|jsonl|csv] [--fields COL,…]
 ```
 
 Одна запись по внутреннему идентификатору или `external_id` (`GET /{records_type}/{id}`).
 
 | Флаг | Что делает |
 |---|---|
-| `--include REL,…` | связанные объекты: у `reviews` — `author`, `product`, `comments`, `state_changes`; у `products` — `reviews_summary_item`, `reviews`, `questions`, `brand`, `category`; у `questions` — `author`, `product`, `answers`; у `consumers` — `reviews`, `questions`, `orders` |
+| `--include REL,…` | связанные объекты: у `reviews` — `author`, `product`, `comments`, `state_changes`; у `products` — `reviews_summary_item`, `reviews`, `questions`, `brand`, `category`; у `questions` — `author`, `product`, `answers`; у `consumers` — `reviews`, `questions`, `orders`; у `orders` — `consumer` (сервер не принимает `product` из спеки) |
 | `--format FORMAT` | как у `scroll`: `raw` — тело ответа одной строкой; `jsonl` — запись с подставленными объектами `--include`; `csv` — заголовок и строка |
 | `--fields COL,…` | колонки CSV — по правилам `scroll` |
+
+У заказа `ID` — внутренний идентификатор или `number`.
 
 ```bash
 aplaut reviews get 5f1c2a9e8b7d6c5b4a3f2e1d                              # по внутреннему id
@@ -535,6 +538,35 @@ aplaut consumers update <ID> [--email EMAIL] [--name TEXT] [--first-name TEXT] [
 aplaut consumers update crm-c-42 --unsubscribed true
 aplaut consumers update crm-c-42 --email anna@example.com --name "Анна Петрова" --upsert   # синхронизация из CRM
 ```
+
+### orders create
+
+```text
+aplaut orders create --number ID [--consumer-name TEXT] [--consumer-email EMAIL]
+    [--consumer-phone PHONE] [--data FILE|-] [-n]
+```
+
+Создаёт заказ (`POST /orders`). Данные клиента в заказе — персональные. Обязательны `number` (внешний
+id заказа) и хотя бы одно из `consumer_email`, `consumer_phone`. Строки заказа — только через `--data`:
+`{"order_lines":[{"product_id":"444772","name":"Диск","price":5990}]}`; `product_id` в строке обязателен
+(сервер строку без него принимает молча, CLI — нет). С новым e-mail или телефоном сервер создаёт и
+клиента. Второй заказ с тем же `number` сервер не создаст, поэтому повтор после сбоя безопасен.
+
+```bash
+echo '{"order_lines":[{"product_id":"444772","name":"Диск","price":5990}]}' \
+  | aplaut orders create --number 31337 --consumer-email anna@example.com --data -
+```
+
+### orders update
+
+```text
+aplaut orders update <ID> [--consumer-name TEXT] [--consumer-email EMAIL] [--consumer-phone PHONE]
+    [--data FILE|-] [--upsert] [-n]
+```
+
+Меняет заказ (`PUT /orders/{id}`) по правилам [`update`](#запись). `order_lines` сервер **заменяет
+целиком** — передавайте все строки; `details` сливаются, `null` очищает атрибут. `number` не меняется.
+Смена `consumer_email` меняет атрибут заказа, связанный клиент остаётся прежним.
 
 ## self
 
