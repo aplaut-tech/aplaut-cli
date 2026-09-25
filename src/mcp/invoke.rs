@@ -2,8 +2,8 @@
 //! его stdin и куда идёт его stdout.
 
 use std::ffi::OsString;
-use std::fs::{File, OpenOptions};
-use std::io;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Seek};
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 
@@ -14,6 +14,7 @@ use super::tools::{Kind, ToolDef, DEFAULT_FORMAT, INLINE_DEFAULT_RECORDS, INLINE
 use crate::envelope;
 use crate::error::CliError;
 use crate::spec;
+use crate::state;
 
 /// Куда идёт stdout дочернего процесса (§5).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,8 +116,9 @@ async fn execute(runner: &Runner, kind: Kind, plan: Plan) -> Result<Reply, CliEr
             None
         }
         Destination::File { path, mode } => {
-            command.stdout(Stdio::from(open(path, *mode)?));
-            Some(path.clone())
+            let file = OutputFile::open(path, *mode)?;
+            command.stdout(file.stdout()?);
+            Some(file)
         }
     };
     let mut child = command
@@ -139,8 +141,11 @@ async fn execute(runner: &Runner, kind: Kind, plan: Plan) -> Result<Reply, CliEr
     for line in debug {
         eprintln!("{line}");
     }
+    if let Some(file) = &file {
+        file.settle(ok)?;
+    }
     let envelope = match &file {
-        Some(path) if ok => add_output_file(&line, path),
+        Some(file) if ok => add_output_file(&line, &file.path),
         _ => line,
     };
     let data = (kind != Kind::Write && file.is_none() && !stdout.is_empty()).then_some(stdout);
@@ -151,12 +156,53 @@ async fn execute(runner: &Runner, kind: Kind, plan: Plan) -> Result<Reply, CliEr
     })
 }
 
-/// Файл для `output_file` (§5): `CreateNew` атомарно отказывает, если файл уже есть.
+/// Файл `output_file` (§5). stdout дочернего процесса — дубликат `handle`: курсор у них общий,
+/// поэтому после выхода процесса видно, сколько он записал.
+struct OutputFile {
+    path: PathBuf,
+    mode: FileMode,
+    handle: File,
+}
+
+impl OutputFile {
+    fn open(path: &Path, mode: FileMode) -> Result<OutputFile, CliError> {
+        Ok(OutputFile {
+            path: path.to_path_buf(),
+            mode,
+            handle: open(path, mode)?,
+        })
+    }
+
+    fn stdout(&self) -> Result<Stdio, CliError> {
+        self.handle
+            .try_clone()
+            .map(Stdio::from)
+            .map_err(|e| CliError::io("дескриптор output_file", &e))
+    }
+
+    /// Файл меняется, только если выгрузка в него писала: неудачный вызов не оставляет пустой файл
+    /// (повтор упёрся бы в `output_exists`) и не стирает перезаписываемый. Перезапись отрезает
+    /// хвост старого содержимого по тому, сколько записано.
+    fn settle(&self, ok: bool) -> Result<(), CliError> {
+        let written = (&self.handle)
+            .stream_position()
+            .map_err(|e| CliError::io("позиция в output_file", &e))?;
+        let result = match self.mode {
+            FileMode::CreateNew if written == 0 && !ok => fs::remove_file(&self.path),
+            FileMode::Truncate if written > 0 || ok => self.handle.set_len(written),
+            _ => Ok(()),
+        };
+        result.map_err(|e| CliError::io(&format!("output_file {}", self.path.display()), &e))
+    }
+}
+
+/// `CreateNew` атомарно отказывает, если файл уже есть; `Truncate` не обрезает сразу — это делает
+/// `OutputFile::settle`, когда видно, писала ли выгрузка.
 fn open(path: &Path, mode: FileMode) -> Result<File, CliError> {
     let mut options = OpenOptions::new();
     match mode {
         FileMode::CreateNew => options.write(true).create_new(true),
-        FileMode::Truncate => options.write(true).create(true).truncate(true),
+        FileMode::Truncate => options.write(true).create(true).truncate(false),
         FileMode::Append => options.append(true).create(true),
     };
     options.open(path).map_err(|err| {
@@ -337,12 +383,28 @@ fn scroll_flags(
         boolean(args, "overwrite")?,
         cwd,
     )?;
-    if let Some(n) = max_records(count(args, "max_records")?, &destination)? {
+    let max_records = max_records(count(args, "max_records")?, &destination)?;
+    if let Some(n) = max_records {
         push_flag(argv, "max-records", &n.to_string());
-        let per_page = n.min(u64::from(spec::SCROLL_PER_PAGE_MAX));
+    }
+    // Размер страницы фиксируется при открытии обхода, стейт требует тот же: иначе порция инлайн,
+    // а затем остальное в файл упали бы на `state_mismatch` по невидимому агенту `per_page`.
+    let per_page = state
+        .as_deref()
+        .and_then(|state| saved_per_page(&cwd.join(state)))
+        .or(max_records.map(|n| n.min(u64::from(spec::SCROLL_PER_PAGE_MAX))));
+    if let Some(per_page) = per_page {
         push_flag(argv, "per-page", &per_page.to_string());
     }
     Ok(destination)
+}
+
+/// `per_page` из стейта; нет файла или он повреждён — решит дочерний CLI (`state_invalid`).
+fn saved_per_page(path: &Path) -> Option<u64> {
+    state::load(path)
+        .ok()
+        .flatten()
+        .map(|saved| u64::from(saved.params.per_page))
 }
 
 /// Инлайн — 1–100 записей, по умолчанию 20 (M7); в файл — сколько угодно, без лимита — всё.
@@ -761,8 +823,25 @@ mod tests {
             .write_all(b"new\n")
             .unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "old\nnew\n");
-        open(&path, FileMode::Truncate).unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
+        // Перезапись и новый файл меняются, только если выгрузка в них писала (§5).
+        let failed = OutputFile::open(&path, FileMode::Truncate).unwrap();
+        failed.settle(false).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "old\nnew\n");
+        let replaced = OutputFile::open(&path, FileMode::Truncate).unwrap();
+        // Дочерний процесс пишет в дубликат дескриптора — курсор общий.
+        (&replaced.handle).write_all(b"x\n").unwrap();
+        replaced.settle(true).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "x\n",
+            "хвост старого отрезан"
+        );
+        let fresh = dir.join("new.jsonl");
+        OutputFile::open(&fresh, FileMode::CreateNew)
+            .unwrap()
+            .settle(false)
+            .unwrap();
+        assert!(!fresh.exists(), "пустой файл после ошибки удалён");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

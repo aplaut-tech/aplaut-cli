@@ -6,6 +6,7 @@ mod support;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use support::{aplaut, first_page_json, page_json, review, MockServer, Reply, TempDir};
@@ -62,15 +63,29 @@ impl Client {
     }
 
     fn request(&mut self, method: &str, params: Value) -> Value {
+        let id = self.send_request(method, params);
+        self.response_to(id)
+    }
+
+    /// Запрос без ожидания ответа; id запроса.
+    fn send_request(&mut self, method: &str, params: Value) -> u64 {
         self.next_id += 1;
         let id = self.next_id;
         self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
-        let mut line = String::new();
-        self.stdout.read_line(&mut line).expect("ответ сервера");
-        let response: Value =
-            serde_json::from_str(&line).unwrap_or_else(|e| panic!("не JSON ({e}): {line}"));
-        assert_eq!(response["id"], id, "{response}");
-        response
+        id
+    }
+
+    /// Ответ на запрос `id`; ответы на другие (например, отменённые) пропускаются.
+    fn response_to(&mut self, id: u64) -> Value {
+        loop {
+            let mut line = String::new();
+            self.stdout.read_line(&mut line).expect("ответ сервера");
+            let response: Value =
+                serde_json::from_str(&line).unwrap_or_else(|e| panic!("не JSON ({e}): {line}"));
+            if response["id"] == id {
+                return response;
+            }
+        }
     }
 
     fn call(&mut self, tool: &str, arguments: Value) -> Value {
@@ -546,5 +561,147 @@ fn child_validation_errors_pass_through() {
         "fields_need_tabular_format"
     );
     assert!(server.requests().is_empty());
+    assert_eq!(client.finish(), 0);
+}
+
+/// Сколько живых дочерних процессов у `pid`: убитый, но ещё не пожатый tokio (зомби) — не в счёт.
+/// `pgrep -P` и `ps -o stat= -p` есть и в Linux, и в macOS.
+fn running_children(pid: u32) -> usize {
+    let out = Command::new("pgrep")
+        .args(["-P", &pid.to_string()])
+        .output()
+        .expect("pgrep");
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|child| {
+            let ps = Command::new("ps")
+                .args(["-o", "stat=", "-p", child.trim()])
+                .output()
+                .expect("ps");
+            let stat = String::from_utf8_lossy(&ps.stdout);
+            !stat.trim().is_empty() && !stat.trim_start().starts_with('Z')
+        })
+        .count()
+}
+
+fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !done() {
+        assert!(Instant::now() < deadline, "не дождались: {what}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// API, который принимает соединение и молчит: без отмены дочерний aplaut ждал бы весь `--timeout`.
+fn silent_api() -> (String, std::sync::mpsc::Receiver<()>) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/v4", listener.local_addr().unwrap());
+    let (accepted, wait) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let held: Vec<_> = listener
+            .incoming()
+            .take(1)
+            .flatten()
+            .inspect(|_| {
+                let _ = accepted.send(());
+            })
+            .collect();
+        std::thread::sleep(Duration::from_secs(60));
+        drop(held);
+    });
+    (url, wait)
+}
+
+/// rmcp при отмене только взводит токен; дочерний процесс должен умереть, а не выгружать дальше.
+#[test]
+fn cancelled_call_kills_its_child() {
+    let home = TempDir::new("mcp-cancel");
+    let (url, accepted) = silent_api();
+    let mut client = Client::start(
+        home.path(),
+        &["--base-url", &url, "--max-retries", "0"],
+        &[TOKEN],
+    );
+    let pid = client.child.id();
+    let id = client.send_request(
+        "tools/call",
+        json!({"name": "reviews_get", "arguments": {"id": "r1"}}),
+    );
+    accepted
+        .recv_timeout(Duration::from_secs(5))
+        .expect("запрос дошёл до API");
+    assert_eq!(running_children(pid), 1, "вызов идёт в дочернем процессе");
+    client.send(
+        json!({"jsonrpc": "2.0", "method": "notifications/cancelled",
+                       "params": {"requestId": id, "reason": "test"}}),
+    );
+    wait_until(
+        "отменённый вызов убил дочерний процесс",
+        || running_children(pid) == 0,
+    );
+    let ping = client.request("ping", json!({}));
+    assert!(ping.get("result").is_some(), "сервер жив: {ping}");
+    assert_eq!(client.finish(), 0);
+}
+
+/// Неудачный вызов не оставляет пустой файл (иначе повтор — `output_exists`) и не стирает
+/// перезаписываемый.
+#[test]
+fn failed_call_leaves_output_files_as_they_were() {
+    let home = TempDir::new("mcp-failed-file");
+    let server = MockServer::start(vec![]);
+    let mut client = served(home.path(), &server, &[]);
+    let bad = json!({"filter": FILTER, "fields": ["id"], "output_file": "new.jsonl"});
+    assert!(is_error(&client.call("reviews_scroll", bad)));
+    assert!(
+        !home.path().join("new.jsonl").exists(),
+        "пустой файл после ошибки"
+    );
+    let old = home.path().join("old.jsonl");
+    std::fs::write(&old, "старое\n").unwrap();
+    let bad =
+        json!({"filter": FILTER, "fields": ["id"], "output_file": "old.jsonl", "overwrite": true});
+    assert!(is_error(&client.call("reviews_scroll", bad)));
+    assert_eq!(std::fs::read_to_string(&old).unwrap(), "старое\n");
+    assert_eq!(client.finish(), 0);
+}
+
+/// Порция инлайн, затем остальное в файл — с тем же стейтом: размер страницы берётся из стейта.
+#[test]
+fn state_keeps_its_page_size_when_limit_or_destination_change() {
+    let home = TempDir::new("mcp-state-page");
+    let first = first_page_json(
+        &[
+            review("r1", "2024-01-01T00:00:00Z"),
+            review("r2", "2024-01-02T00:00:00Z"),
+        ],
+        Some("c1"),
+        true,
+        4,
+        None,
+    );
+    let second = page_json(
+        &[
+            review("r3", "2024-01-03T00:00:00Z"),
+            review("r4", "2024-01-04T00:00:00Z"),
+        ],
+        None,
+        false,
+    );
+    let server = MockServer::start(vec![Reply::json(200, first), Reply::json(200, second)]);
+    let mut client = served(home.path(), &server, &[]);
+    let peek = client.call(
+        "reviews_scroll",
+        json!({"filter": FILTER, "state": "s.json", "max_records": 2}),
+    );
+    assert!(!is_error(&peek), "{peek}");
+    let rest = client.call(
+        "reviews_scroll",
+        json!({"filter": FILTER, "state": "s.json", "output_file": "rest.jsonl"}),
+    );
+    assert!(!is_error(&rest), "{rest}");
+    assert_eq!(envelope(&rest)["result"]["completed"], true);
+    let lines = std::fs::read_to_string(home.path().join("rest.jsonl")).unwrap();
+    assert_eq!(lines.lines().count(), 2, "{lines}");
     assert_eq!(client.finish(), 0);
 }

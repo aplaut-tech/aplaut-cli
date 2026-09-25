@@ -87,7 +87,7 @@ impl ServerHandler for Server {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
         let Some(tool) = self.tools.iter().find(|t| t.name == request.name) else {
             return Err(McpError::invalid_params(
@@ -96,7 +96,15 @@ impl ServerHandler for Server {
             ));
         };
         let arguments = request.arguments.unwrap_or_default();
-        let reply = invoke::call(&self.runner, tool, &arguments).await;
+        // rmcp при отмене только взводит токен и не дропает обработчик; без этого дочерний
+        // процесс выгружал бы дальше. Drop future убивает его (`kill_on_drop`).
+        let Some(reply) = context
+            .ct
+            .run_until_cancelled(invoke::call(&self.runner, tool, &arguments))
+            .await
+        else {
+            return Err(McpError::internal_error("вызов отменён клиентом", None));
+        };
         let mut content = vec![ContentBlock::text(reply.envelope)];
         content.extend(reply.data.map(ContentBlock::text));
         let result = if reply.is_error {
