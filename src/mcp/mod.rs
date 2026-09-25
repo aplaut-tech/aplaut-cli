@@ -8,8 +8,9 @@ use std::ffi::OsString;
 use std::sync::Arc;
 
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, Implementation, InitializeResult, ListToolsResult,
-    PaginatedRequestParams, ServerCapabilities, Tool, ToolAnnotations,
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
+    InitializeResult, ListToolsResult, PaginatedRequestParams, ServerCapabilities, Tool,
+    ToolAnnotations,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
@@ -50,6 +51,7 @@ pub fn serve(setup: ServerSetup) -> Result<(), CliError> {
 
 struct Server {
     tools: Vec<tools::ToolDef>,
+    runner: invoke::Runner,
     instructions: String,
 }
 
@@ -57,6 +59,7 @@ impl Server {
     fn new(setup: ServerSetup) -> Self {
         Server {
             tools: tools::enabled(setup.allow_writes),
+            runner: invoke::Runner::new(setup.forwarded),
             instructions: setup.instructions,
         }
     }
@@ -79,15 +82,29 @@ impl ServerHandler for Server {
         ))
     }
 
+    /// Неизвестный инструмент (и запись без `--allow-writes`) — ошибка протокола; всё остальное —
+    /// ответ инструмента с конвертом, чтобы модель прочла `code` и `hint` (§4).
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
-        Err(McpError::invalid_params(
-            format!("unknown tool: {}", request.name),
-            None,
-        ))
+        let Some(tool) = self.tools.iter().find(|t| t.name == request.name) else {
+            return Err(McpError::invalid_params(
+                format!("unknown tool: {}", request.name),
+                None,
+            ));
+        };
+        let arguments = request.arguments.unwrap_or_default();
+        let reply = invoke::call(&self.runner, tool, &arguments).await;
+        let mut content = vec![ContentBlock::text(reply.envelope)];
+        content.extend(reply.data.map(ContentBlock::text));
+        let result = if reply.is_error {
+            CallToolResult::error(content)
+        } else {
+            CallToolResult::success(content)
+        };
+        Ok(CallToolResponse::Complete(result))
     }
 }
 

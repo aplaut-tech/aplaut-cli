@@ -2,11 +2,16 @@
 //! его stdin и куда идёт его stdout.
 
 use std::ffi::OsString;
+use std::fs::{File, OpenOptions};
+use std::io;
 use std::path::{Path, PathBuf};
+use std::process::{ExitStatus, Stdio};
 
 use serde_json::{Map, Value};
+use tokio::io::AsyncWriteExt;
 
 use super::tools::{Kind, ToolDef, DEFAULT_FORMAT, INLINE_DEFAULT_RECORDS, INLINE_MAX_RECORDS};
+use crate::envelope;
 use crate::error::CliError;
 use crate::spec;
 
@@ -36,6 +41,182 @@ pub struct Plan {
     pub args: Vec<OsString>,
     pub stdin: Option<String>,
     pub destination: Destination,
+}
+
+/// Как запускать дочерние вызовы: бинарь, флаги сервера (M6), каталог для относительных путей.
+pub struct Runner {
+    pub exe: PathBuf,
+    pub forwarded: Vec<OsString>,
+    pub cwd: PathBuf,
+}
+
+impl Runner {
+    pub fn new(forwarded: Vec<OsString>) -> Runner {
+        Runner {
+            exe: self_exe(),
+            forwarded,
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        }
+    }
+}
+
+/// На Linux — `/proc/self/exe`: после `self update` дочерние вызовы — той же версии, что и схемы
+/// инструментов (M14).
+fn self_exe() -> PathBuf {
+    let proc_exe = Path::new("/proc/self/exe");
+    if cfg!(target_os = "linux") && proc_exe.exists() {
+        return proc_exe.to_path_buf();
+    }
+    std::env::current_exe().unwrap_or_else(|_| PathBuf::from("aplaut"))
+}
+
+/// Ответ инструмента (§4): конверт, данные инлайн, ошибка ли.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reply {
+    pub envelope: String,
+    pub data: Option<String>,
+    pub is_error: bool,
+}
+
+/// Вызов целиком: план, дочерний процесс, ответ. Ошибка до запуска — конверт от сервера (§4).
+pub async fn call(runner: &Runner, tool: &ToolDef, args: &Map<String, Value>) -> Reply {
+    let dry_run = matches!(args.get("dry_run"), Some(Value::Bool(true)));
+    let result = match plan(tool, args, &runner.forwarded, &runner.cwd) {
+        Ok(plan) => execute(runner, tool.kind, plan).await,
+        Err(err) => Err(err),
+    };
+    result.unwrap_or_else(|err| Reply {
+        envelope: envelope::failure(&err, &tool.command_name(), dry_run, &[]),
+        data: None,
+        is_error: true,
+    })
+}
+
+async fn execute(runner: &Runner, kind: Kind, plan: Plan) -> Result<Reply, CliError> {
+    let Plan {
+        args,
+        stdin,
+        destination,
+    } = plan;
+    let mut command = tokio::process::Command::new(&runner.exe);
+    command
+        .args(&args)
+        .stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stderr(Stdio::piped())
+        // Отмена вызова клиентом и выход сервера убивают дочерний процесс (§3).
+        .kill_on_drop(true);
+    let file = match &destination {
+        Destination::Inline => {
+            command.stdout(Stdio::piped());
+            None
+        }
+        Destination::File { path, mode } => {
+            command.stdout(Stdio::from(open(path, *mode)?));
+            Some(path.clone())
+        }
+    };
+    let mut child = command
+        .spawn()
+        .map_err(|e| CliError::io("запуск дочернего aplaut", &e))?;
+    if let (Some(input), Some(mut pipe)) = (stdin, child.stdin.take()) {
+        pipe.write_all(input.as_bytes())
+            .await
+            .map_err(|e| CliError::io("запись в stdin дочернего aplaut", &e))?;
+        // `pipe` закрывается здесь: дочерний процесс дочитывает `--data -` до EOF.
+    }
+    let out = child
+        .wait_with_output()
+        .await
+        .map_err(|e| CliError::io("ожидание дочернего aplaut", &e))?;
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let (line, ok, debug) =
+        split_envelope(kind, &stdout, &stderr).ok_or_else(|| no_envelope(out.status, &stderr))?;
+    for line in debug {
+        eprintln!("{line}");
+    }
+    let envelope = match &file {
+        Some(path) if ok => add_output_file(&line, path),
+        _ => line,
+    };
+    let data = (kind != Kind::Write && file.is_none() && !stdout.is_empty()).then_some(stdout);
+    Ok(Reply {
+        envelope,
+        data,
+        is_error: !ok,
+    })
+}
+
+/// Файл для `output_file` (§5): `CreateNew` атомарно отказывает, если файл уже есть.
+fn open(path: &Path, mode: FileMode) -> Result<File, CliError> {
+    let mut options = OpenOptions::new();
+    match mode {
+        FileMode::CreateNew => options.write(true).create_new(true),
+        FileMode::Truncate => options.write(true).create(true).truncate(true),
+        FileMode::Append => options.append(true).create(true),
+    };
+    options.open(path).map_err(|err| {
+        if err.kind() == io::ErrorKind::AlreadyExists {
+            CliError::usage("output_exists", format!("файл {} уже есть", path.display()))
+                .with_field("output_file")
+                .with_hint("укажите другой output_file или overwrite: true; продолжить выгрузку в него — со state")
+        } else {
+            CliError::io(&format!("открытие {}", path.display()), &err)
+        }
+    })
+}
+
+/// Конверт — последняя строка stderr, если это конверт; у записи успех идёт в stdout (§4).
+/// Возвращает строку конверта, `ok` и прочие строки stderr (`debug:`) — для лога сервера.
+pub fn split_envelope<'a>(
+    kind: Kind,
+    stdout: &str,
+    stderr: &'a str,
+) -> Option<(String, bool, Vec<&'a str>)> {
+    let mut lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
+    if let Some(ok) = lines.last().and_then(|line| envelope_ok(line)) {
+        let line = lines.pop().expect("последняя строка есть").to_string();
+        return Some((line, ok, lines));
+    }
+    if kind == Kind::Write {
+        let line = stdout.lines().rev().find(|l| !l.trim().is_empty())?;
+        let ok = envelope_ok(line)?;
+        return Some((line.to_string(), ok, lines));
+    }
+    None
+}
+
+/// `ok` конверта, если строка — конверт (`ok` и `command` на месте).
+fn envelope_ok(line: &str) -> Option<bool> {
+    let value: Value = serde_json::from_str(line).ok()?;
+    value.get("command")?;
+    value.get("ok")?.as_bool()
+}
+
+/// В `result` успешного конверта — абсолютный путь файла (§5).
+fn add_output_file(line: &str, path: &Path) -> String {
+    let mut value: Value = serde_json::from_str(line).expect("конверт уже разобран");
+    if let Some(result) = value.get_mut("result").and_then(Value::as_object_mut) {
+        result.insert(
+            "output_file".into(),
+            Value::String(path.display().to_string()),
+        );
+    }
+    value.to_string()
+}
+
+fn no_envelope(status: ExitStatus, stderr: &str) -> CliError {
+    let lines: Vec<&str> = stderr.lines().collect();
+    let tail = lines[lines.len().saturating_sub(20)..].join("\n");
+    CliError::general(
+        "internal",
+        format!("дочерний aplaut завершился без конверта ({status}): {tail}"),
+    )
+    .with_hint("сообщите в поддержку: support@aplaut.com")
 }
 
 /// Проверка аргументов и argv: `<флаги сервера> <ресурс> <глагол> <флаги> --json --no-input [-- <id>]`.
@@ -527,5 +708,61 @@ mod tests {
                 ("usage", Some(field))
             );
         }
+    }
+
+    #[test]
+    fn envelope_is_the_last_stderr_line_or_stdout_for_writes() {
+        let env = r#"{"ok":true,"command":"reviews.scroll","cli_version":"0","dry_run":false,"result":{},"warnings":[]}"#;
+        let stderr = format!("debug: GET /scroll/reviews\n{env}\n");
+        let (line, ok, debug) = split_envelope(Kind::Scroll, "{\"id\":\"r1\"}\n", &stderr).unwrap();
+        assert_eq!(
+            (line.as_str(), ok, debug),
+            (env, true, vec!["debug: GET /scroll/reviews"])
+        );
+        let write = r#"{"ok":true,"command":"reviews.create","cli_version":"0","dry_run":true,"result":{},"warnings":[]}"#;
+        let (line, ok, debug) =
+            split_envelope(Kind::Write, &format!("{write}\n"), "debug: x\n").unwrap();
+        assert_eq!((line.as_str(), ok, debug), (write, true, vec!["debug: x"]));
+        let failed = r#"{"ok":false,"command":"reviews.get","cli_version":"0","dry_run":false,"error":{},"warnings":[]}"#;
+        let (_, ok, _) = split_envelope(Kind::Get, "", failed).unwrap();
+        assert!(!ok);
+        assert!(
+            split_envelope(Kind::Scroll, "{\"ok\":true,\"command\":\"x\"}", "паника").is_none(),
+            "у scroll stdout — данные"
+        );
+        assert!(split_envelope(Kind::Write, "", "").is_none());
+    }
+
+    #[test]
+    fn output_file_is_added_to_result() {
+        let env = r#"{"ok":true,"command":"reviews.scroll","result":{"emitted":1}}"#;
+        let added: Value =
+            serde_json::from_str(&add_output_file(env, Path::new("/work/out.jsonl"))).unwrap();
+        assert_eq!(
+            added["result"],
+            json!({"emitted": 1, "output_file": "/work/out.jsonl"})
+        );
+    }
+
+    #[test]
+    fn create_new_refuses_existing_file() {
+        let dir = std::env::temp_dir().join(format!("aplaut-mcp-open-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("out.jsonl");
+        std::fs::write(&path, "old\n").unwrap();
+        let err = open(&path, FileMode::CreateNew).unwrap_err();
+        assert_eq!(
+            (err.code.as_str(), err.field.as_deref()),
+            ("output_exists", Some("output_file"))
+        );
+        use std::io::Write as _;
+        open(&path, FileMode::Append)
+            .unwrap()
+            .write_all(b"new\n")
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "old\nnew\n");
+        open(&path, FileMode::Truncate).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

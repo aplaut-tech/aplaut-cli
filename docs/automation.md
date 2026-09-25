@@ -80,6 +80,7 @@
 | `state_version` | 2 | стейт записан другой версией формата |
 | `state_mismatch` | 2 | параметры (в том числе `--fields`) не совпадают со стейтом |
 | `scroll_position_uncertain` | 2 | прошлый запуск оборвался посреди продолжения; в `hint` — команда для нового обхода |
+| `output_exists` | 2 | `aplaut mcp`: `output_file` уже есть, а `state` и `overwrite` не заданы |
 | `no_token` | 3 | токен не найден ни в одном источнике |
 | `token_file_unreadable` | 3 | файл токена не читается |
 | `unauthorized`, `invalid_token` | 3 | 401: токен отклонён (код — из `WWW-Authenticate`, если сервер его прислал); у `self update` — GitHub отклонил `APLAUT_CLI_GITHUB_TOKEN` |
