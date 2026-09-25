@@ -111,3 +111,80 @@ rate_limited (retry_after — сколько секунд ждать), server_er
 Коды выхода: 0 — обновлён или создан (с -n — план); 2 — ошибка во входных данных, до сети;
 3 — нет токена или он отклонён; 5 — вопроса нет (без --upsert); 7 — rate limit, повторы
 исчерпаны; 1 — прочие ошибки.";
+
+pub(super) const CONSUMERS_CREATE_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut consumers create --external-id crm-c-42 --email anna@example.com --name \"Анна Петрова\"
+  aplaut consumers create --external-id crm-c-42 --phone \"+7 900 000-00-00\" -n   # показать запрос, не отправляя
+
+  # Для агента: атрибуты — JSON-объектом из stdin, итог — одной строкой JSON в stdout.
+  echo '{\"external_id\":\"crm-c-42\",\"email\":\"anna@example.com\",\"custom_attributes\":{\"segment\":\"vip\"}}' \\
+    | aplaut consumers create --data - --json
+
+Данные клиентов — персональные: e-mail, телефон, имя.
+Атрибуты — из схемы тела POST /consumers в спеке; флаги перекрывают одноимённые ключи --data.
+Обязательных нет: сервер создаёт клиента и без e-mail и имени, хотя спека их требует. Сервер
+приводит name к виду «Анна Петрова» и сбрасывает first_name, из телефона оставляет цифры.
+custom_attributes и даты — через --data. С -n (--dry-run) токен проверяется, но запросов нет.
+
+Повторы: CLI повторяет запрос сам, только если сервер его точно не обработал. После
+request_outcome_unknown с --external-id повтор безопасен: второго клиента с тем же external_id
+(и с тем же e-mail) сервер не создаст; проверить — aplaut consumers get <external_id>.
+
+JSON (--json):
+  {\"ok\":true,\"command\":\"consumers.create\",\"cli_version\":…,\"dry_run\":false,
+   \"result\":{\"request\":{\"method\":\"POST\",\"path\":\"/consumers\",
+   \"body\":{\"data\":{\"type\":\"consumers\",\"attributes\":{…}}}},
+   \"created\":{\"id\",\"type\":\"consumers\",\"attributes\":{…}}},\"warnings\":[]}
+  С -n — тот же request, \"created\":null и \"dry_run\":true.
+
+Ошибки: unknown_attribute (в hint — допустимые), invalid_attribute, invalid_data, stdin_conflict,
+stdin_is_terminal, validation_failed (422; external_id или email is already taken — клиент уже есть,
+в hint — что делать), request_outcome_unknown, bad_response, no_token, invalid_token, unauthorized,
+forbidden, rate_limited (retry_after — сколько секунд ждать), server_error, network_error.
+
+Коды выхода: 0 — создан (с -n — план); 2 — ошибка во входных данных, до сети; 3 — нет токена
+или он отклонён; 7 — rate limit, повторы исчерпаны; 1 — прочие ошибки, в том числе
+request_outcome_unknown.";
+
+pub(super) const CONSUMERS_UPDATE_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut consumers update crm-c-42 --unsubscribed true
+  aplaut consumers update crm-c-42 --first-name \"Анна\" -n          # проверить, что клиент есть, и показать запрос
+
+  # Синхронизация из CRM: создать клиента, если его ещё нет (external_id — ID); e-mail и телефон
+  # применяются только при создании.
+  aplaut consumers update crm-c-42 --email anna@example.com --name \"Анна Петрова\" --upsert --json
+
+  # Для агента: null очищает атрибут, в custom_attributes — удаляет ключ.
+  echo '{\"first_name\":null,\"custom_attributes\":{\"segment\":\"vip\",\"old\":null}}' \\
+    | aplaut consumers update crm-c-42 --data - --json
+
+Данные клиентов — персональные: e-mail, телефон, имя.
+ID — внутренний идентификатор или external_id (без «.» и «/»). Меняются только переданные атрибуты,
+custom_attributes сливаются с текущими. Сначала CLI проверяет запросом GET, что клиент есть: API на
+PUT с неизвестным id создаёт нового клиента. Нет клиента — not_found (код 5), ничего не создано;
+--upsert пропускает проверку и создаёт клиента с external_id = ID.
+E-mail и телефон сервер задаёт только при создании, а у существующего клиента молча оставляет
+прежними: без --upsert --email и --phone — ошибка до отправки. name сервер приводит к виду
+«Анна Петрова» и сбрасывает first_name. external_id не меняется. С -n (--dry-run) токен и наличие
+клиента проверяются, PUT не отправляется.
+
+Повторы: правка идемпотентна и повторяется после таймаута и 5xx, как чтение.
+
+JSON (--json):
+  {\"ok\":true,\"command\":\"consumers.update\",\"cli_version\":…,\"dry_run\":false,
+   \"result\":{\"request\":{\"method\":\"PUT\",\"path\":\"/consumers/<id>\",
+   \"body\":{\"data\":{\"type\":\"consumers\",\"attributes\":{…}}}},
+   \"updated\":{\"id\",\"type\":\"consumers\",\"attributes\":{…}},\"created\":false},\"warnings\":[]}
+  created: true — клиент создан этим вызовом (--upsert, ответ 201; после повтора — false).
+  С -n — тот же request, \"updated\":null, \"exists\":true|false и \"dry_run\":true.
+
+Ошибки: invalid_id, nothing_to_update, unknown_attribute, invalid_attribute (в том числе email и
+phone без --upsert), invalid_data, stdin_conflict, stdin_is_terminal, not_found (клиента нет, без
+--upsert), validation_failed (422), bad_response, no_token, invalid_token, unauthorized, forbidden,
+rate_limited (retry_after — сколько секунд ждать), server_error, network_error, timeout.
+
+Коды выхода: 0 — обновлён или создан (с -n — план); 2 — ошибка во входных данных, до сети;
+3 — нет токена или он отклонён; 5 — клиента нет (без --upsert); 7 — rate limit, повторы
+исчерпаны; 1 — прочие ошибки.";

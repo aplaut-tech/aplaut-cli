@@ -102,6 +102,12 @@ pub enum Command {
         #[command(subcommand)]
         verb: QuestionsVerb,
     },
+    /// Клиенты
+    #[command(arg_required_else_help = true)]
+    Consumers {
+        #[command(subcommand)]
+        verb: ConsumersVerb,
+    },
     /// Токен доступа: сохранить или удалить
     #[command(arg_required_else_help = true)]
     Auth {

@@ -1,6 +1,7 @@
 //! Клей между деревом clap и алгоритмами: сборка зависимостей и сообщения пользователю.
 
 pub mod auth;
+pub mod consumers;
 pub mod mcp;
 pub mod products;
 pub mod profile;
@@ -21,9 +22,10 @@ use serde::Serialize;
 use crate::api_error::ErrorContext;
 use crate::auth::{EnvSnapshot, StdinSource, TokenFlags, DEFAULT_BASE_URL};
 use crate::cli::{
-    AuthVerb, Command, CommentArgs, CreateProductArgs, CreateQuestionArgs, CreateReviewArgs,
-    GlobalArgs, ProductsVerb, ProfileVerb, QuestionsVerb, RecordsVerb, ReviewsVerb, SelfVerb,
-    UpdateInput, UpdateProductArgs, UpdateQuestionArgs, UpdateReviewArgs,
+    AuthVerb, Command, CommentArgs, ConsumersVerb, CreateConsumerArgs, CreateProductArgs,
+    CreateQuestionArgs, CreateReviewArgs, GlobalArgs, ProductsVerb, ProfileVerb, QuestionsVerb,
+    RecordsVerb, ReviewsVerb, SelfVerb, UpdateConsumerArgs, UpdateInput, UpdateProductArgs,
+    UpdateQuestionArgs, UpdateReviewArgs,
 };
 use crate::clock::Clock;
 use crate::config::{self, Paths};
@@ -112,6 +114,7 @@ pub fn dispatch(command: Command, ctx: &Ctx) -> Result<Outcome, CliError> {
         Command::Reviews { verb } => reviews::run(verb, ctx),
         Command::Products { verb } => products::run(verb, ctx),
         Command::Questions { verb } => questions::run(verb, ctx),
+        Command::Consumers { verb } => consumers::run(verb, ctx),
         Command::Auth { verb } => auth::run(verb, ctx),
         Command::Profile { verb } => profile::run(verb, ctx),
         Command::SelfCmd { verb } => self_update::run(verb, ctx),
@@ -160,6 +163,16 @@ pub fn is_dry_run(command: &Command) -> bool {
                     input: UpdateInput { dry, .. },
                     ..
                 }),
+        }
+        | Command::Consumers {
+            verb: ConsumersVerb::Create(CreateConsumerArgs { dry, .. }),
+        }
+        | Command::Consumers {
+            verb:
+                ConsumersVerb::Update(UpdateConsumerArgs {
+                    input: UpdateInput { dry, .. },
+                    ..
+                }),
         } => dry.dry_run,
         _ => false,
     }
@@ -172,6 +185,14 @@ pub fn command_name(command: &Command) -> String {
         Command::Reviews { verb } => ("reviews", reviews_verb(verb)),
         Command::Products { verb } => ("products", products_verb(verb)),
         Command::Questions { verb } => ("questions", questions_verb(verb)),
+        Command::Consumers { verb } => (
+            "consumers",
+            match verb {
+                ConsumersVerb::Get(_) => "get",
+                ConsumersVerb::Create(_) => "create",
+                ConsumersVerb::Update(_) => "update",
+            },
+        ),
         Command::Auth { verb } => (
             "auth",
             match verb {

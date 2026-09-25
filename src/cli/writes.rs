@@ -5,9 +5,12 @@ use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
 
-use super::help::LEAF_AFTER_HELP;
-use super::help_writes::{QUESTIONS_CREATE_AFTER_LONG_HELP, QUESTIONS_UPDATE_AFTER_LONG_HELP};
-use super::{DryRun, RecordsVerb};
+use super::help::{GET_AFTER_LONG_HELP, LEAF_AFTER_HELP};
+use super::help_writes::{
+    CONSUMERS_CREATE_AFTER_LONG_HELP, CONSUMERS_UPDATE_AFTER_LONG_HELP,
+    QUESTIONS_CREATE_AFTER_LONG_HELP, QUESTIONS_UPDATE_AFTER_LONG_HELP,
+};
+use super::{DryRun, GetArgs, RecordsVerb};
 
 /// Общее у `update` ресурсов, где PUT создаёт объект, если его нет (R3): `--data`, `--upsert`, `-n`.
 #[derive(Debug, Clone, Args)]
@@ -110,6 +113,64 @@ pub struct UpdateQuestionArgs {
     pub id: String,
     #[command(flatten)]
     pub fields: QuestionFields,
+    #[command(flatten)]
+    pub input: UpdateInput,
+}
+
+/// Клиенты: чтение одной записи и запись (спека writes-and-exports §3); scroll у API нет.
+#[derive(Debug, Subcommand)]
+pub enum ConsumersVerb {
+    /// Один клиент по внутреннему или внешнему id (GET /consumers/{id}): персональные данные — e-mail, телефон, имя
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = GET_AFTER_LONG_HELP)]
+    Get(GetArgs),
+    /// Создать клиента (POST /consumers): атрибуты флагами или JSON-объектом в --data
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = CONSUMERS_CREATE_AFTER_LONG_HELP)]
+    Create(CreateConsumerArgs),
+    /// Изменить клиента (PUT /consumers/{id}): меняются только переданные атрибуты; e-mail и телефон — только при создании
+    #[command(after_help = LEAF_AFTER_HELP, after_long_help = CONSUMERS_UPDATE_AFTER_LONG_HELP)]
+    Update(UpdateConsumerArgs),
+}
+
+/// Атрибуты клиента, общие для create и update (спека writes-and-exports §3).
+#[derive(Debug, Clone, Args)]
+pub struct ConsumerFields {
+    /// E-mail; сервер задаёт его только при создании клиента (у update — с --upsert)
+    #[arg(long, value_name = "EMAIL")]
+    pub email: Option<String>,
+    /// Полное имя; сервер приводит его к виду «Анна Петрова» и сбрасывает first_name
+    #[arg(long, value_name = "TEXT")]
+    pub name: Option<String>,
+    /// Имя
+    #[arg(long, value_name = "TEXT")]
+    pub first_name: Option<String>,
+    /// Телефон (сервер оставляет цифры); задаётся только при создании клиента (у update — с --upsert)
+    #[arg(long, value_name = "PHONE")]
+    pub phone: Option<String>,
+    /// Отписан от писем: true или false
+    #[arg(long, value_name = "true|false")]
+    pub unsubscribed: Option<String>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct CreateConsumerArgs {
+    /// Id клиента в вашей системе: по нему get найдёт клиента, а повтор не создаст второго
+    #[arg(long, value_name = "ID")]
+    pub external_id: Option<String>,
+    #[command(flatten)]
+    pub fields: ConsumerFields,
+    /// Атрибуты JSON-объектом из файла (`-` — из stdin); флаги перекрывают его ключи
+    #[arg(long, value_name = "FILE|-")]
+    pub data: Option<PathBuf>,
+    #[command(flatten)]
+    pub dry: DryRun,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct UpdateConsumerArgs {
+    /// Клиент: внутренний или внешний (external_id) идентификатор
+    pub id: String,
+    #[command(flatten)]
+    pub fields: ConsumerFields,
     #[command(flatten)]
     pub input: UpdateInput,
 }

@@ -107,6 +107,7 @@ ID — внутренний идентификатор или external_id (бе�
   reviews    author, product, comments, state_changes
   products   reviews_summary_item, reviews, questions, brand, category
   questions  author, product, answers
+  consumers  reviews, questions, orders
 
 Форматы — как у scroll, для одной записи: raw — тело ответа одной строкой; jsonl — запись
 с подставленными объектами --include; csv — заголовок и строка (--fields — по правилам scroll).

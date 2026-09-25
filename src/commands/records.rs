@@ -1,5 +1,4 @@
-//! Глаголы чтения ресурсов с записями (reviews, products, questions): scroll и get. Запись
-//! у отзывов — в `reviews`.
+//! Глаголы чтения: scroll (reviews, products, questions) и get (и у клиентов и заказов).
 
 use std::collections::HashSet;
 use std::io::{self, BufWriter, Write};
@@ -33,7 +32,7 @@ struct GetResult<'a> {
     id: Option<String>,
 }
 
-fn get_record(resource: &Resource, args: &GetArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
+pub fn get_record(resource: &Resource, args: &GetArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
     let allowed = spec::get_includes(resource.records_type).ok_or_else(|| {
         CliError::general(
             "internal",

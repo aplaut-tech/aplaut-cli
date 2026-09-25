@@ -11,6 +11,7 @@ JSON, ошибками и кодами выхода — `aplaut <ресурс> <
 | `reviews` — отзывы | [`scroll`](#scroll), [`get`](#get), [`create`](#reviews-create), [`comment`](#reviews-comment), [`update`](#reviews-update) |
 | `products` — товары | [`scroll`](#scroll), [`get`](#get), [`create`](#products-create), [`update`](#products-update) |
 | `questions` — вопросы | [`scroll`](#scroll), [`get`](#get), [`create`](#questions-create), [`update`](#questions-update) |
+| `consumers` — клиенты (персональные данные) | [`get`](#get), [`create`](#consumers-create), [`update`](#consumers-update) |
 | [`self`](#self) — сам aplaut | [`update`](#self-update) |
 | [`mcp`](#mcp) — MCP-сервер для агентов | — (`aplaut mcp`) |
 
@@ -187,9 +188,10 @@ GUI-редактор должен ждать, пока вы закроете ф�
 ошибка: опечатка вроде `base-url` иначе молча отправила бы запросы на прод. Комментарии в файле
 пропадают, когда aplaut сам его перезаписывает (`auth login`, `profile set`).
 
-## Чтение: reviews, products, questions
+## Чтение
 
-У всех трёх ресурсов есть `scroll` (выгрузка обходом) и `get` (одна запись); флаги у них общие.
+У `reviews`, `products` и `questions` есть `scroll` (выгрузка обходом) и `get` (одна запись), у
+`consumers` — только `get`; флаги у них общие.
 
 ### scroll
 
@@ -261,14 +263,14 @@ aplaut reviews scroll --filter 'updated_at:gte:2024-01-01T00:00:00Z,rating:in:4|
 ### get
 
 ```text
-aplaut <reviews|products|questions> get <ID> [--include REL,…] [--format raw|jsonl|csv] [--fields COL,…]
+aplaut <reviews|products|questions|consumers> get <ID> [--include REL,…] [--format raw|jsonl|csv] [--fields COL,…]
 ```
 
 Одна запись по внутреннему идентификатору или `external_id` (`GET /{records_type}/{id}`).
 
 | Флаг | Что делает |
 |---|---|
-| `--include REL,…` | связанные объекты: у `reviews` — `author`, `product`, `comments`, `state_changes`; у `products` — `reviews_summary_item`, `reviews`, `questions`, `brand`, `category`; у `questions` — `author`, `product`, `answers` |
+| `--include REL,…` | связанные объекты: у `reviews` — `author`, `product`, `comments`, `state_changes`; у `products` — `reviews_summary_item`, `reviews`, `questions`, `brand`, `category`; у `questions` — `author`, `product`, `answers`; у `consumers` — `reviews`, `questions`, `orders` |
 | `--format FORMAT` | как у `scroll`: `raw` — тело ответа одной строкой; `jsonl` — запись с подставленными объектами `--include`; `csv` — заголовок и строка |
 | `--fields COL,…` | колонки CSV — по правилам `scroll` |
 
@@ -495,6 +497,43 @@ aplaut questions update <ID> [--text TEXT] [--product-id ID] [--author-name TEXT
 
 ```bash
 aplaut questions update crm-q-17 --state published
+```
+
+### consumers create
+
+```text
+aplaut consumers create [--external-id ID] [--email EMAIL] [--name TEXT] [--first-name TEXT]
+    [--phone PHONE] [--unsubscribed true|false] [--data FILE|-] [-n]
+```
+
+Создаёт клиента (`POST /consumers`). Данные клиентов — персональные: e-mail, телефон, имя.
+Обязательных атрибутов нет — сервер создаёт клиента и без e-mail и имени. Второго клиента с тем же
+`external_id` или e-mail сервер не создаст, поэтому повтор после сбоя безопасен.
+
+| Флаг | Что делает |
+|---|---|
+| `--external-id ID` | id клиента в вашей системе |
+| `--email EMAIL`, `--phone PHONE` | контакты; задаются только при создании (из телефона сервер оставляет цифры) |
+| `--name TEXT` | полное имя; сервер приводит его к виду «Анна Петрова» и сбрасывает `first_name` |
+| `--first-name TEXT` | имя |
+| `--unsubscribed true\|false` | отписан ли от писем |
+| `--data FILE\|-` | остальные атрибуты: `custom_attributes`, даты |
+| `-n`, `--dry-run` | показать запрос, не отправляя |
+
+### consumers update
+
+```text
+aplaut consumers update <ID> [--email EMAIL] [--name TEXT] [--first-name TEXT] [--phone PHONE]
+    [--unsubscribed true|false] [--data FILE|-] [--upsert] [-n]
+```
+
+Меняет клиента (`PUT /consumers/{id}`) по правилам [`update`](#запись). `null` очищает атрибут,
+`custom_attributes` сливаются. E-mail и телефон сервер у существующего клиента не меняет: без
+`--upsert` `--email` и `--phone` — ошибка до отправки, с `--upsert` они задаются новому клиенту.
+
+```bash
+aplaut consumers update crm-c-42 --unsubscribed true
+aplaut consumers update crm-c-42 --email anna@example.com --name "Анна Петрова" --upsert   # синхронизация из CRM
 ```
 
 ## self

@@ -42,10 +42,10 @@ claude mcp add aplaut-prod -- aplaut mcp --profile prod
 | Инструмент | Команда | Режим |
 |---|---|---|
 | `reviews_scroll`, `products_scroll`, `questions_scroll` | `<ресурс> scroll` | всегда |
-| `reviews_get`, `products_get`, `questions_get` | `<ресурс> get` | всегда |
-| `reviews_create`, `products_create` | `<ресурс> create` | `--allow-writes` |
+| `reviews_get`, `products_get`, `questions_get`, `consumers_get` | `<ресурс> get` | всегда |
+| `reviews_create`, `products_create`, `questions_create`, `consumers_create` | `<ресурс> create` | `--allow-writes` |
 | `reviews_comment` | `reviews comment` | `--allow-writes` |
-| `reviews_update`, `products_update` | `<ресурс> update` | `--allow-writes` |
+| `reviews_update`, `products_update`, `questions_update`, `consumers_update` | `<ресурс> update` | `--allow-writes` |
 
 Параметры повторяют флаги команды (`max_records` ↔ `--max-records`), атрибуты записи — поля схемы
 спеки. Формат по умолчанию — `jsonl`: запись со связями из `include` одной строкой.
@@ -53,6 +53,9 @@ claude mcp add aplaut-prod -- aplaut mcp --profile prod
 `update` отзывов (и других ресурсов, где API на `PUT` с неизвестным id создаёт объект) сначала
 проверяет, что объект есть: нет — `not_found`, ничего не создано. Параметр `upsert: true` разрешает
 создать объект с внешним id из `id`; в `result` — `created: true`.
+
+`consumers_get` и инструменты записи клиентов работают с персональными данными (e-mail, телефон,
+имя): давайте их агенту, только если это нужно задаче.
 
 Ответ: первый текстовый блок — JSON-конверт, как у `--json`; второй — данные, если они есть. При
 ошибке `isError: true`, в конверте — `error.code`, `hint`, `retryable`.

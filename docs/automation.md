@@ -12,7 +12,7 @@ MCP-клиентам удобнее `aplaut mcp`: те же команды ин�
 | `--json` | итог и ошибка — одной строкой JSON; предупреждения — в `warnings`, а не текстом; включает `--no-input` |
 | `--no-input` | ничего не спрашивать: вместо вопроса — ошибка с подсказкой, какой флаг передать |
 | `--yes` (`-y`) | подтвердить удаление без вопроса (`profile delete`) |
-| `--dry-run` (`-n`) | у `profile set/delete`, `auth login/logout`, `reviews create/comment/update`, `products create/update`, `questions create/update`, `self update`: всё проверить и вернуть план в `result`, ничего не меняя |
+| `--dry-run` (`-n`) | у `profile set/delete`, `auth login/logout`, `reviews create/comment/update`, `products create/update`, `questions create/update`, `consumers create/update`, `self update`: всё проверить и вернуть план в `result`, ничего не меняя |
 
 ## JSON-конверт
 
@@ -64,7 +64,7 @@ MCP-клиентам удобнее `aplaut mcp`: те же команды ин�
 | `unknown_field` | 2 | колонки из `--fields` нет на первой странице обхода (в `hint` — ближайшее имя и все колонки) |
 | `field_to_many` | 2 | `<связь>.<атрибут>` у связи-списка |
 | `unknown_attribute` | 2 | атрибута нет в схеме тела запроса; в `hint` — ближайшее имя и допустимые |
-| `invalid_attribute` | 2 | значение атрибута не того типа, не из перечисления, вне границ или не RFC 3339; или атрибут, который сервер в этой операции молча игнорирует (внешний id в `update`) |
+| `invalid_attribute` | 2 | значение атрибута не того типа, не из перечисления, вне границ или не RFC 3339; или атрибут, который сервер в этой операции молча игнорирует (внешний id в `update`), e-mail и телефон клиента в `update` без `--upsert` |
 | `missing_attribute` | 2 | не задан обязательный атрибут |
 | `invalid_data` | 2 | `--data` не читается, не JSON-объект или обёрнут в `data` |
 | `stdin_conflict` | 2 | `--data -` вместе с токеном из stdin |

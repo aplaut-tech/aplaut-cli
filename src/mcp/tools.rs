@@ -433,7 +433,10 @@ mod tests {
                 "questions_scroll",
                 "questions_get",
                 "questions_create",
-                "questions_update"
+                "questions_update",
+                "consumers_get",
+                "consumers_create",
+                "consumers_update"
             ]
         );
         assert!(enabled(false).iter().all(|t| !t.writes()));
@@ -613,5 +616,22 @@ mod tests {
             &json!(spec::scroll_spec("reviews").unwrap().includes)
         );
         assert_eq!(scroll.title, "Отзывы: scroll");
+    }
+
+    /// Спека writes-and-exports §6: get клиентов и заказов отдаёт персональные данные — модель
+    /// должна это видеть в описании.
+    #[test]
+    #[allow(clippy::single_element_loop)] // список пополнится в task-7 (orders_get)
+    fn personal_data_is_named_in_get_tools() {
+        let catalog = catalog();
+        for name in ["consumers_get"] {
+            let tool = find(&catalog, name);
+            assert!(
+                tool.description.contains("персональные данные"),
+                "{name}: {}",
+                tool.description
+            );
+            assert_eq!(tool.hints, READ_ONLY, "{name}");
+        }
     }
 }
