@@ -12,6 +12,7 @@ pub mod commands;
 pub mod config;
 pub mod envelope;
 pub mod error;
+pub mod export_filter;
 pub mod filter;
 pub mod fsutil;
 pub mod http;

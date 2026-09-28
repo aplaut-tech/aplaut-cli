@@ -322,4 +322,38 @@ mod tests {
             "товар переименовывается (P7)"
         );
     }
+
+    /// Стейджинг и код сервера, 2026-09-28 (спека writes-and-exports §9): экспорт принимает больше типов,
+    /// чем перечисляет спека.
+    #[test]
+    fn export_task_schema_follows_staging() {
+        let export = write_spec("POST", "/export_tasks").expect("POST /export_tasks");
+        assert_eq!(
+            (export.resource_type, export.required, export.nullable),
+            ("export_tasks", &[][..], false)
+        );
+        assert_eq!(
+            export.attribute("records_type").unwrap().enum_values,
+            &[
+                "reviews",
+                "products",
+                "questions",
+                "consumers",
+                "orders",
+                "survey_responses"
+            ]
+        );
+        assert_eq!(
+            export.attribute("format").unwrap().enum_values,
+            &["csv", "xlsx", "jsonl"]
+        );
+        assert_eq!(
+            export.attribute("search_options").unwrap().ty,
+            AttrType::Object
+        );
+        assert_eq!(
+            export.attribute("export_format").unwrap().ty,
+            AttrType::String
+        );
+    }
 }

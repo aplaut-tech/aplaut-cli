@@ -31,6 +31,8 @@ struct WriteOp {
     ignored: &'static [&'static str],
     /// Атрибуты, которые сервер применяет, только когда PUT создаёт объект (upsert).
     create_only: &'static [&'static str],
+    /// Перечисления, которые сервер принимает иначе, чем спека: (атрибут, значения).
+    enums: &'static [(&'static str, &'static [&'static str])],
 }
 
 impl WriteOp {
@@ -44,6 +46,7 @@ impl WriteOp {
             nullable: false,
             ignored: &[],
             create_only: &[],
+            enums: &[],
         }
     }
 
@@ -57,11 +60,12 @@ impl WriteOp {
             nullable: false,
             ignored: &[],
             create_only: &[],
+            enums: &[],
         }
     }
 }
 
-const WRITE_OPERATIONS: [WriteOp; 11] = [
+const WRITE_OPERATIONS: [WriteOp; 12] = [
     WriteOp::create("/reviews"),
     WriteOp::create("/reviews/{id}/relationships/comments"),
     WriteOp::create("/products"),
@@ -96,6 +100,22 @@ const WRITE_OPERATIONS: [WriteOp; 11] = [
         nullable: true,
         ignored: &["number"],
         ..WriteOp::update("/orders/{id}")
+    },
+    // Стейджинг и код сервера, 2026-09-28 (спека writes-and-exports §9): экспорт принимает вопросы, клиентов
+    // и заказов, хотя спека перечисляет только reviews, products, survey_responses.
+    WriteOp {
+        enums: &[(
+            "records_type",
+            &[
+                "reviews",
+                "products",
+                "questions",
+                "consumers",
+                "orders",
+                "survey_responses",
+            ],
+        )],
+        ..WriteOp::create("/export_tasks")
     },
 ];
 
@@ -344,7 +364,12 @@ fn write_spec(out: &mut String, spec: &Yaml, op: &WriteOp) {
     let properties = attributes["properties"]
         .as_hash()
         .unwrap_or_else(|| panic!("spec: {what}: нет properties атрибутов"));
-    for name in op.ignored.iter().chain(op.create_only) {
+    for name in op
+        .ignored
+        .iter()
+        .chain(op.create_only)
+        .chain(op.enums.iter().map(|(n, _)| n))
+    {
         if !properties.contains_key(&Yaml::String((*name).to_string())) {
             panic!("spec: {what}: атрибута {name} нет в схеме");
         }
@@ -374,10 +399,14 @@ fn write_spec(out: &mut String, spec: &Yaml, op: &WriteOp) {
             ),
             _ => "None".to_string(),
         };
+        let enum_values = match op.enums.iter().find(|(n, _)| *n == name) {
+            Some((_, values)) => values.iter().map(|v| v.to_string()).collect(),
+            None => strings(&schema["enum"]),
+        };
         writeln!(
             out,
             "        AttributeSpec {{ name: {name:?}, ty: AttrType::{ty}, enum_values: &{:?}, minimum: {:?}, maximum: {:?}, format: {:?}, item_type: {item_type} }},",
-            strings(&schema["enum"]),
+            enum_values,
             number(&schema["minimum"]),
             number(&schema["maximum"]),
             schema["format"].as_str(),
