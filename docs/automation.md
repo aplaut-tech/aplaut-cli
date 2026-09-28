@@ -26,8 +26,9 @@ MCP-клиентам удобнее `aplaut mcp`: те же команды ин�
 ```
 
 - Без терминала или с `--json` ошибка — JSON-конверт.
-- Итог — в stdout; у `scroll` и `get` stdout занят данными, поэтому их итог — в stderr. Ошибка — всегда в
-  stderr. С `--verbose` строки `debug:` идут до конверта: конверт — всегда последняя строка.
+- Итог — в stdout; у `scroll` и `get` (кроме `exports get` — данных у него нет, итог там в stdout) stdout
+  занят данными, поэтому их итог — в stderr. Ошибка — всегда в stderr. С `--verbose` строки `debug:` идут до
+  конверта: конверт — всегда последняя строка.
 - `retry_after` — сколько секунд ждать по словам сервера (429, 503), иначе `null`.
 - Поля `result` каждой команды — в `aplaut <команда> --help`, раздел «JSON (--json)».
 - Стабильность: поля и коды только добавляются; переименование или удаление — только со сменой
@@ -50,11 +51,13 @@ MCP-клиентам удобнее `aplaut mcp`: те же команды ин�
 
 ```bash
 # crontab: ночная выгрузка отзывов за сутки одним файлом; 0 — файл на месте, иначе — код и JSON-ошибка
-15 3 * * * aplaut exports create --records-type reviews --filter updated_at:gte:$(date -u -d yesterday +\%FT00:00:00Z) --output /data/reviews.jsonl --json >> /var/log/aplaut.log 2>&1
+15 3 * * * aplaut exports create --records-type reviews --filter updated_at:gte:$(date -u -d yesterday +\%FT00:00:00Z) --output /data/reviews.jsonl --json >/dev/null 2>>/var/log/aplaut.log
 ```
 
-Файл появляется атомарно: при сбое прежний остаётся на месте. `export_wait_timeout` повторим — задача
-продолжается на сервере, `aplaut exports get <id> --output …` скачает её без новой задачи.
+В лог — только stderr (ошибки): успешный конверт несёт `archive_url` — постоянную публичную ссылку без
+подписи, которую никто не чистит, а конверт ошибки — id задачи и код, без ссылки. Файл появляется
+атомарно: при сбое прежний остаётся на месте. `export_wait_timeout` повторим — задача продолжается на
+сервере, `aplaut exports get <id> --output …` скачает её без новой задачи.
 
 ## Коды ошибок
 
@@ -104,8 +107,8 @@ MCP-клиентам удобнее `aplaut mcp`: те же команды ин�
 | `profile_not_found` | 5 | профиля нет; в `hint` — существующие |
 | `rate_limited` | 7 | 429: повторы исчерпаны или ждать дольше 5 минут; `retry_after` — сколько. У `self update` — 403/429 GitHub API, `retry_after` — `null` |
 | `confirmation_required` | 8 | удаление без `--yes` там, где спросить нельзя |
-| `export_rejected` | 1 | задача экспорта завершилась с ошибкой (`rejected`); текст сервера — в `message`, у `csv`/`xlsx` с `--jq` — подсказка про массив |
-| `export_refused` | 1 | сервер отклонил задачу экспорта (`refused`): исчерпана дневная квота (60 минут выгрузки на компанию) или задача не стартовала за сутки |
+| `export_rejected` | 1 | задача экспорта завершилась с ошибкой (`rejected`); текст сервера — в `message`, подсказка — сузить `--filter` (лимит записей: 500 000, у товаров — 800 000) или повторить позже; у `csv`/`xlsx` с `--jq` — вдобавок про массив |
+| `export_refused` | 1 | сервер отклонил задачу экспорта (`refused`): экспорт выключен в настройках компании (`export_forbidden_in_company_settings`) или задача не стартовала за сутки (`maximum_time_to_start_exceeded`) |
 | `export_wait_timeout` | 1 | `--wait` не дождался задачи экспорта за `--wait-timeout`; `retryable: true`, в `hint` — `aplaut exports get <id> --wait` |
 | `bad_request` | 1 | 400 |
 | `validation_failed` | 1 | 422: сервер отклонил параметры |
@@ -118,7 +121,7 @@ MCP-клиентам удобнее `aplaut mcp`: те же команды ин�
 | `timeout` | 1 | нет ответа за `--timeout` после повторов |
 | `network_error` | 1 | сеть или TLS после повторов |
 | `response_too_large` | 1 | ответ больше допустимого |
-| `bad_response` | 1 | ответ не по контракту: не JSON, `has_more` без курсора, 2xx записи без `data` (запись, скорее всего, выполнена; `retryable: false` у POST, `true` у идемпотентного PUT) |
+| `bad_response` | 1 | ответ не по контракту: не JSON, `has_more` без курсора, 2xx записи без `data` (запись, скорее всего, выполнена; `retryable: false` у POST, `true` у идемпотентного PUT); у скачивания архива экспорта — gzip обрезан или испорчен (не путать с `network_error`: тело дошло целиком, дело не в сети) |
 | `scroll_interrupted` | 1 | продолжение оборвалось, неизвестно, обработал ли его сервер; в `hint` — как продолжить |
 | `no_progress` | 1 | страницы без новых записей: обход зациклился |
 | `update_unavailable` | 1 | `self update`: aplaut поставлен не установщиком (нет receipt или он от другого бинаря) или на GitHub нет релиза с установщиком; ничего не изменено |

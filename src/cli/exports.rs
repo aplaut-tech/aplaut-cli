@@ -21,13 +21,14 @@ pub enum ExportsVerb {
 /// Ожидание и скачивание — общее у create и get (R8, R9).
 #[derive(Debug, Clone, Args)]
 pub struct ExportWait {
-    /// Дождаться конца задачи (опрос: 2 с, затем реже, не реже раза в 30 с)
+    /// Дождаться конца задачи (опрос: сначала через 2 с, интервал растёт до 30 с)
     #[arg(long)]
     pub wait: bool,
     /// Сколько ждать задачу и скачивание, секунд
     #[arg(long, value_name = "SECONDS", default_value_t = 1800)]
     pub wait_timeout: u64,
-    /// Скачать готовый файл сюда (включает --wait): gzip распаковывается, xlsx — как есть; файл перезаписывается
+    /// Скачать готовый файл сюда (включает --wait): gzip распаковывается, xlsx — как есть; файл
+    /// перезаписывается; "-" не значит stdout — экспорт пишет только файл
     #[arg(long, value_name = "PATH")]
     pub output: Option<PathBuf>,
 }

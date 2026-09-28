@@ -5,9 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Проект
 
 `aplaut` — консольный клиент Aplaut Platform API на Rust (бинарь `aplaut`, библиотека `aplaut_cli`):
-выгрузка и запись отзывов, товаров, вопросов, клиентов и заказов, экспорт одним файлом для DWH, cron и агентов. Справка CLI, сообщения,
-документация и комментарии в коде — на русском; сообщения коммитов — на английском, conventional commits
-(`feat:`, `fix:`, `chore:`, `docs:`, `ci:`, `refactor:`, `test:`).
+выгрузка и запись отзывов, товаров, вопросов, клиентов и заказов, экспорт одним файлом для DWH, cron и
+агентов. Справка CLI, сообщения, документация и комментарии в коде — на русском; сообщения коммитов — на
+английском, conventional commits (`feat:`, `fix:`, `chore:`, `docs:`, `ci:`, `refactor:`, `test:`).
 
 Репозиторий публичный. `docs/superpowers/` (внутренние спеки и планы) в `.gitignore` — не коммитить.
 Адрес стейджинга и токены — только в `.envrc` (тоже в `.gitignore`), не в код и не в коммиты.
@@ -28,8 +28,8 @@ dist plan                                      # что соберёт рели�
 ```
 
 Релиз: версия в `Cargo.toml` (и `Cargo.lock`), ссылка на установщик в `README.md`, версия в
-`tests/cli.rs` → коммит `chore: release X.Y.Z` → push тега `vX.Y.Z`; cargo-dist собирает 4 таргета
-(`dist-workspace.toml`).
+`tests/cli.rs`, примеры `cli_version` в `docs/automation.md` → коммит `chore: release X.Y.Z` → push
+тега `vX.Y.Z`; cargo-dist собирает 4 таргета (`dist-workspace.toml`).
 
 ## Архитектура
 
@@ -72,7 +72,8 @@ dist plan                                      # что соберёт рели�
 ## Контракты, которые нельзя сломать
 
 - stdout — данные или итог, всё для человека — в stderr через `term::Reporter`. С `--json` stderr — только
-  конверт; у `scroll` и `get` конверт идёт в stderr, потому что stdout занят данными.
+  конверт; у `scroll` и `get` конверт идёт в stderr, потому что stdout занят данными (у `exports get` —
+  в stdout: данных у него нет).
 - Конверт (`envelope.rs`), коды ошибок, предупреждений и выхода — публичный контракт для агентов: только
   добавляются. Каждый новый код — строка в каталоге `docs/automation.md`, иначе падает
   `tests/catalog.rs`. Поля `result` каждой команды описаны в её `--help` (`cli/help.rs`).

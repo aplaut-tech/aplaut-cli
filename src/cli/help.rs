@@ -72,7 +72,8 @@ pub(super) const ROOT_AFTER_LONG_HELP: &str = concat!(
                 {\"ok\":true,\"command\":…,\"cli_version\":…,\"dry_run\":false,\"result\":…,\"warnings\":[…]}
                 {\"ok\":false,…,\"error\":{\"code\",\"message\",\"field\",\"retryable\",\"retry_after\",
                  \"hint\",\"request_id\"},\"warnings\":[…]}
-              итог — в stdout (у scroll и get — в stderr: stdout занят данными), ошибка — в stderr;
+              итог — в stdout (у scroll и get — в stderr: stdout занят данными; у exports get данных
+              нет — в stdout), ошибка — в stderr;
               предупреждения — в warnings с кодами, а не текстом; включает --no-input
   --no-input  ничего не спрашивать: вместо вопроса — ошибка с подсказкой, какой флаг передать
   --yes       подтвердить удаление без вопроса (profile delete)
