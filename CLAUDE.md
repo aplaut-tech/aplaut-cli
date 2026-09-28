@@ -51,10 +51,10 @@ dist plan                                      # что соберёт рели�
 - **update с upsert** (`commands/updates.rs`): у отзывов, вопросов, клиентов и заказов PUT создаёт
   объект, если его нет, — `update` сначала делает `GET` (`not_found` без `--upsert`), затем PUT с
   `Replay::Safe`; `created` — по 201. `create` с внешним id — `writes::create_unique`.
-- **Экспорт** (`commands/exports.rs`): задача `POST /export_tasks` → ожидание (`ops/export.rs`, через `Clock`) → скачивание публичной ссылки без токена
-  (`download.rs`, gzip потоком, tmp + rename). `--filter` в синтаксисе `scroll` переводится в хэш экспорта
-  (`export_filter.rs`): сервер строку понимает только у отзывов. Лимит — 1 задача/мин на ключ, отклонённая тоже
-  считается: проверки до сети.
+- **Экспорт** (`commands/exports.rs`): задача `POST /export_tasks` → ожидание (`ops/export.rs`, через
+  `Clock`) → скачивание публичной ссылки без токена (`download.rs`, gzip потоком, tmp + rename). `--filter` в
+  синтаксисе `scroll` переводится в хэш экспорта (`export_filter.rs`): сервер строку понимает только у отзывов.
+  Лимит — 1 задача/мин на ключ, отклонённая тоже считается: проверки до сети.
 - **Scroll** (`ops/scroll.rs`, `state.rs`): курсор не идемпотентен — перед продолжением стейт
   помечается `in_flight`. Стейт пишется атомарно и только в точках фиксации формата
   (`RecordSink::write_page` → `Commit::Durable`): at-least-once, хвост прошлой страницы отсекается по id.

@@ -24,7 +24,7 @@ https://github.com/aplaut-tech/aplaut-cli/blob/main/docs/automation.md
 output_file — не больше 100 записей за вызов (max_records, по умолчанию 20); со state повторный вызов \
 отдаёт следующую порцию. Больше — в output_file.
 consumers_get и orders_get отдают персональные данные (e-mail, телефон, имя): не пересказывайте их без нужды.
-exports_create — одна задача в минуту на токен; archive_url в ответе открывается без токена.";
+archive_url в ответе экспорта открывается без токена.";
 
 pub fn run(args: &McpArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
     check_stdin_free(&ctx.global)?;
@@ -111,7 +111,11 @@ fn instructions(allow_writes: bool, target: Result<(String, String), CliError>) 
         "Запись выключена (сервер запущен без --allow-writes): только чтение и выгрузка."
             .to_string()
     };
-    format!("{INSTRUCTIONS_HEAD} {target} {mode}\n{INSTRUCTIONS_BODY}")
+    let mut text = format!("{INSTRUCTIONS_HEAD} {target} {mode}\n{INSTRUCTIONS_BODY}");
+    if allow_writes {
+        text.push_str("\nexports_create — одна задача в минуту на токен.");
+    }
+    text
 }
 
 #[cfg(test)]
@@ -188,16 +192,21 @@ mod tests {
         for name in tools::names(true) {
             assert!(writes.contains(&name), "нет {name}: {writes}");
         }
+        // Write mode should mention exports_create and its rate limit.
+        assert!(writes.contains("exports_create"), "{writes}");
+        assert!(writes.contains("одна задача в минуту"), "{writes}");
+
         let read_only = instructions(false, target());
-        // Проверяем, что write-инструменты не перечислены в first line (mode line),
-        // но они могут упоминаться в INSTRUCTIONS_BODY в контексте ограничений.
-        let first_line = read_only.lines().next().unwrap_or("");
+        // Read-only mode must not name any write tools (no exports_create).
         assert!(
             tools::names(true)
                 .iter()
-                .all(|name| !first_line.contains(name.as_str())),
-            "write tools in mode line: {first_line}"
+                .all(|name| !read_only.contains(name.as_str())),
+            "{read_only}"
         );
+        // Both modes should contain the tool-neutral archive_url warning.
+        assert!(writes.contains("archive_url"), "{writes}");
+        assert!(read_only.contains("archive_url"), "{read_only}");
     }
 
     #[test]

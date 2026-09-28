@@ -4,8 +4,8 @@
 //!   APLAUT_ACCESS_TOKEN_FILE=… cargo test --test e2e -- --ignored --test-threads=1
 //!
 //! Токен — из APLAUT_ACCESS_TOKEN_FILE или APLAUT_ACCESS_TOKEN; адрес стенда в коде не хранится.
-//! Круги записи (`review_*`, `product_*`, `question_*`, `consumer_*`, `order_*`), `export_*` — создают и удаляют
-//! тестовые объекты или задачи — только с APLAUT_E2E_WRITES=1.
+//! Круги записи (`review_*`, `product_*`, `question_*`, `consumer_*`, `order_*`) создают и удаляют тестовые
+//! объекты; `export_*` — создают тестовые задачи — только с APLAUT_E2E_WRITES=1.
 
 mod support;
 
