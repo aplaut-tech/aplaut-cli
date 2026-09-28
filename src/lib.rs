@@ -10,6 +10,7 @@ pub mod cli;
 pub mod clock;
 pub mod commands;
 pub mod config;
+pub mod download;
 pub mod envelope;
 pub mod error;
 pub mod export_filter;

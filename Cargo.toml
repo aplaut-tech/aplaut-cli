@@ -26,6 +26,7 @@ path = "src/main.rs"
 # и для MCP-сервера (спека mcp-server M4): stdio и дочерние процессы.
 axoupdater = { version = "0.10", default-features = false, features = ["github_releases"] }
 clap = { version = "4.6", features = ["derive"] }
+flate2 = "1.1"
 reqwest = { version = "0.13", default-features = false }
 # MCP-сервер `aplaut mcp` (спека mcp-server M2): официальный SDK, без макросов и HTTP-транспорта.
 rmcp = { version = "3.4", default-features = false, features = ["server", "transport-io"] }

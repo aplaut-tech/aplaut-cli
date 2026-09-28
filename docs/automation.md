@@ -93,6 +93,9 @@ MCP-клиентам удобнее `aplaut mcp`: те же команды ин�
 | `profile_not_found` | 5 | профиля нет; в `hint` — существующие |
 | `rate_limited` | 7 | 429: повторы исчерпаны или ждать дольше 5 минут; `retry_after` — сколько. У `self update` — 403/429 GitHub API, `retry_after` — `null` |
 | `confirmation_required` | 8 | удаление без `--yes` там, где спросить нельзя |
+| `export_rejected` | 1 | задача экспорта завершилась с ошибкой (`rejected`); текст сервера — в `message`, у `csv`/`xlsx` с `--jq` — подсказка про массив |
+| `export_refused` | 1 | сервер отклонил задачу экспорта (`refused`): исчерпана дневная квота (60 минут выгрузки на компанию) или задача не стартовала за сутки |
+| `export_wait_timeout` | 1 | `--wait` не дождался задачи экспорта за `--wait-timeout`; `retryable: true`, в `hint` — `aplaut exports get <id> --wait` |
 | `bad_request` | 1 | 400 |
 | `validation_failed` | 1 | 422: сервер отклонил параметры |
 | `invalid_cursor` | 1 | сервер не принял курсор |

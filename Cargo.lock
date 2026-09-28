@@ -73,6 +73,7 @@ version = "0.5.0"
 dependencies = [
  "axoupdater",
  "clap",
+ "flate2",
  "reqwest",
  "rmcp",
  "rpassword",
