@@ -8,7 +8,7 @@ use std::io::{self, BufWriter, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use flate2::read::GzDecoder;
+use flate2::read::MultiGzDecoder;
 
 use crate::auth::url_is_loopback;
 use crate::error::CliError;
@@ -49,7 +49,9 @@ pub fn download(url: &str, gzip: bool, dest: &Path, timeouts: Timeouts) -> Resul
     }
     let body = response.body_mut().as_reader();
     let reader: Box<dyn Read> = if gzip {
-        Box::new(GzDecoder::new(body))
+        // `MultiGzDecoder`, а не `GzDecoder`: несколько gzip-членов подряд в одном архиве
+        // `GzDecoder` молча обрежет на первом, `MultiGzDecoder` распакует все.
+        Box::new(MultiGzDecoder::new(body))
     } else {
         Box::new(body)
     };
@@ -112,7 +114,7 @@ fn read_error(host: &str, gzip: bool, err: &io::Error) -> CliError {
             "bad_response",
             format!("архив экспорта с {host} повреждён: {err}"),
         ),
-        ErrorKind::TimedOut => CliError::general(
+        _ if is_body_timeout(err) => CliError::general(
             "timeout",
             format!("архив экспорта с {host} не докачан за отведённое время: {err}"),
         )
@@ -123,6 +125,18 @@ fn read_error(host: &str, gzip: bool, err: &io::Error) -> CliError {
         )
         .retryable(true),
     }
+}
+
+/// ureq 3.4 заворачивает обрыв тела по `--wait-timeout` не в `ErrorKind::TimedOut`, а в
+/// `io::Error::other(ureq::Error::Timeout(_))` (`Error::into_io`, у чтения тела всегда так —
+/// `Error::Io` тут нет): код `ErrorKind` при этом `Other`. Распаковываем исходную ошибку явно;
+/// `ErrorKind::TimedOut` оставлен как запасной вариант на случай других источников чтения.
+fn is_body_timeout(err: &io::Error) -> bool {
+    err.kind() == ErrorKind::TimedOut
+        || err
+            .get_ref()
+            .and_then(|e| e.downcast_ref::<ureq::Error>())
+            .is_some_and(|e| matches!(e, ureq::Error::Timeout(_)))
 }
 
 fn transport(host: &str, err: &ureq::Error) -> CliError {

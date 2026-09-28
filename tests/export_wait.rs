@@ -366,3 +366,71 @@ fn broken_gzip_is_a_bad_response_and_http_errors_keep_their_status() {
     assert_eq!(err.code, "http_404");
     assert!(!dest.exists());
 }
+
+/// Review Focus (fix round 1, finding 1): ureq 3.4 заворачивает обрыв тела по таймауту в
+/// `io::Error::other(ureq::Error::Timeout(_))`, а не в `ErrorKind::TimedOut` — без явной
+/// распаковки исходной ошибки такой обрыв выглядел бы как `network_error`, и агент не понял бы,
+/// что средство — увеличить `--wait-timeout`, а не повторить как есть.
+#[test]
+fn body_timeout_is_reported_as_timeout_not_network_error() {
+    // Заголовки и первые байты тела приходят сразу, дальше сервер 300 мс молчит — дольше,
+    // чем настроенный таймаут тела (50 мс), но не настолько, чтобы тест был медленным.
+    let server = MockServer::start(vec![Reply::Truncated(Duration::from_millis(300))]);
+    let dir = TempDir::new("dl-body-timeout");
+    let dest = dir.path().join("reviews.jsonl");
+    std::fs::write(&dest, "old").unwrap();
+    let url = format!("{}/export_data/a.jsonl", server.origin());
+    let timeouts = Timeouts {
+        response: Duration::from_secs(5),
+        body: Duration::from_millis(50),
+    };
+    let err = download::download(&url, false, &dest, timeouts).unwrap_err();
+    assert_eq!(err.code, "timeout");
+    assert!(err.retryable);
+    assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
+    assert_eq!(
+        std::fs::read_dir(dir.path()).unwrap().count(),
+        1,
+        "tmp удалён"
+    );
+}
+
+/// Review Focus (fix round 1, finding 2): хранилище может отдать архив с транспортным
+/// `Content-Encoding: gzip` (частый приём для статики — реальные байты объекта и есть тело
+/// ответа, только сам HTTP-клиент должен их распаковать). `ureq` собран без фичи `gzip`
+/// (`Cargo.toml`), поэтому он не трогает тело сам и не снимает заголовок — распаковывает
+/// код `download`, ровно один раз, по `archive_content_type` сервера, а не по заголовку
+/// транспорта. Без этой фичи валидный архив не превращается в `bad_response` от двойной
+/// распаковки.
+#[test]
+fn transport_content_encoding_gzip_does_not_cause_double_decoding() {
+    let server = MockServer::start(vec![
+        raw(200, gzip("plain text payload\n")).with_header("Content-Encoding", "gzip")
+    ]);
+    let dir = TempDir::new("dl-content-encoding");
+    let dest = dir.path().join("reviews.jsonl");
+    let url = format!("{}/export_data/a.jsonl.gz", server.origin());
+    download::download(&url, true, &dest, TIMEOUTS).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&dest).unwrap(),
+        "plain text payload\n"
+    );
+}
+
+/// Review Focus (fix round 1, finding 3): `flate2::read::GzDecoder` останавливается после
+/// первого gzip-члена и молча отбрасывает хвост — `MultiGzDecoder` распаковывает все члены
+/// подряд.
+#[test]
+fn multi_member_gzip_archive_is_fully_unpacked() {
+    let mut body = gzip("{\"id\":\"r1\"}\n");
+    body.extend(gzip("{\"id\":\"r2\"}\n"));
+    let server = MockServer::start(vec![raw(200, body)]);
+    let dir = TempDir::new("dl-multi-gzip");
+    let dest = dir.path().join("reviews.jsonl");
+    let url = format!("{}/export_data/a.jsonl.gz", server.origin());
+    download::download(&url, true, &dest, TIMEOUTS).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&dest).unwrap(),
+        "{\"id\":\"r1\"}\n{\"id\":\"r2\"}\n"
+    );
+}
