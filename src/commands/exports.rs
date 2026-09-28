@@ -1,6 +1,7 @@
 //! `aplaut exports` (спека writes-and-exports §5–§7; §9): задача экспорта, ожидание и файл. Модель и
 //! ожидание — в `ops::export`, скачивание — в `download`, перевод фильтра — в `export_filter`.
 
+use std::fs::{self, OpenOptions};
 use std::path::Path;
 use std::time::Duration;
 
@@ -13,6 +14,7 @@ use crate::cli::{CreateExportArgs, ExportWait, ExportsVerb, GetExportArgs};
 use crate::download::{self, Timeouts};
 use crate::error::CliError;
 use crate::export_filter;
+use crate::fsutil;
 use crate::http::{ApiClient, Replay};
 use crate::ops::export::{self, ExportTask};
 use crate::ops::write::{self, Flag, WriteRequest};
@@ -24,8 +26,10 @@ const DEFAULT_FORMAT: &str = "jsonl";
 /// Форматы, к которым сервер применяет jq (`export_format`).
 const JQ_FORMATS: [&str; 2] = ["csv", "xlsx"];
 const SURVEY_RESPONSES: &str = "survey_responses";
-/// gzip распаковывается, остальное (xlsx) сохраняется как есть (§9).
-const GZIP: &str = "application/gzip";
+/// gzip распаковывается, остальное (xlsx) сохраняется как есть (§9). Сервер отдаёт `archive_content_type`
+/// то одним, то другим MIME-типом gzip (валидатор вложений принимает оба, код сервера, 2026-09-28,
+/// `app/models/exports/export_task_attachment.rb:18-19`) — оба и распаковываем.
+const GZIP_CONTENT_TYPES: [&str; 2] = ["application/gzip", "application/x-gzip"];
 /// Исход неизвестен: повтор создал бы вторую задачу, а списка задач в API нет.
 const VERIFY: &str = "задача, возможно, создана: повтор создаст вторую и займёт минутное окно; проверьте выгрузки в личном кабинете";
 
@@ -154,6 +158,15 @@ fn check_wait(wait: &ExportWait) -> Result<(), CliError> {
     let Some(output) = &wait.output else {
         return Ok(());
     };
+    // clig.dev резервирует "-" под stdout; экспорт умеет только файл — не выдумывать, что "-" значит,
+    // а отказать сразу, а не завести файл с таким именем.
+    if output.as_os_str() == "-" {
+        return Err(CliError::usage(
+            "usage",
+            "--output -: этот CLI не пишет архив в stdout (только конверт с --json), у \"-\" здесь нет смысла — укажите путь к файлу",
+        )
+        .with_field("output"));
+    }
     // "missing/" или "existing_file/": trailing-separator путь всегда адресует каталог, даже если
     // Path::parent() (пустой для такого пути) и is_dir() (ложь, если каталога нет или это файл) этого
     // не видят — без явной проверки задача создалась бы, а скачивание упало бы на io_error.
@@ -198,7 +211,26 @@ fn check_wait(wait: &ExportWait) -> Result<(), CliError> {
         .with_field("output")
         .with_hint("создайте каталог заранее: файл кладётся атомарно рядом с ним"));
     }
-    Ok(())
+    check_output_is_writable(output)
+}
+
+/// Каталог существует, но это не значит, что в него можно писать (права, ro-раздел, /dev без root):
+/// без этой проверки задача создалась бы на сервере, а скачивание в конце упало бы на io_error, потратив
+/// минутное окно впустую. Пробуем создать и сразу убрать временный файл — то же имя, что при скачивании
+/// (`fsutil::tmp_path`, I2), поэтому сама проверка не может столкнуться с параллельным запуском.
+fn check_output_is_writable(output: &Path) -> Result<(), CliError> {
+    let tmp = fsutil::tmp_path(output);
+    let _ = fs::remove_file(&tmp);
+    let probe = OpenOptions::new().write(true).create_new(true).open(&tmp);
+    match probe {
+        Ok(_) => {
+            let _ = fs::remove_file(&tmp);
+            Ok(())
+        }
+        Err(e) => {
+            Err(CliError::io(&format!("создание {}", tmp.display()), &e).with_field("output"))
+        }
+    }
 }
 
 fn finish(
@@ -209,7 +241,18 @@ fn finish(
     request: Option<WriteRequest>,
 ) -> Result<Outcome, CliError> {
     let resume = resume_command(&task.id, wait.output.as_deref());
-    let task = if wait.wait || wait.output.is_some() {
+    let will_wait = wait.wait || wait.output.is_some();
+    if will_wait {
+        // Ruling M8 финальной ревизии: id — до начала ожидания, а не только в итоговом конверте. Иначе
+        // `timeout 600 aplaut exports create … --output f` в скрипте, оборвавшись по таймауту `timeout`,
+        // не оставляет способа узнать id и продолжить без новой задачи (молчит под --json — Reporter
+        // сам это решает).
+        ctx.reporter.info(&format!(
+            "экспорт {}: ожидание начато; если прервётся — продолжить командой {resume}",
+            task.id
+        ));
+    }
+    let task = if will_wait {
         export::wait(
             api,
             ctx.clock.as_ref(),
@@ -246,7 +289,10 @@ fn save(
             format!("экспорт {} готов, но ссылки на архив нет", task.id),
         )
     })?;
-    let gzip = task.archive_content_type.as_deref() == Some(GZIP);
+    let gzip = task
+        .archive_content_type
+        .as_deref()
+        .is_some_and(|ct| GZIP_CONTENT_TYPES.contains(&ct));
     let timeouts = Timeouts {
         response: Duration::from_secs(ctx.global.timeout),
         body: Duration::from_secs(wait.wait_timeout),
@@ -265,10 +311,12 @@ fn save(
 /// Команда продолжения для подсказок: та же задача, без повторного создания.
 fn resume_command(id: &str, output: Option<&Path>) -> String {
     match output {
+        // Абсолютный путь (M12): подсказка может понадобиться из другого рабочего каталога — например,
+        // в логе cron, куда команда попадает после сбоя, а не там, где она запускалась.
         Some(path) => format!(
             "aplaut exports get {} --output {}",
             shell_word(id),
-            shell_word(&path.display().to_string())
+            shell_word(&path_text(path))
         ),
         None => format!("aplaut exports get {} --wait", shell_word(id)),
     }
@@ -363,5 +411,28 @@ impl ExportResult {
             refuse_reason: task.refuse_reason,
             output_path,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Review Focus (M12): относительный `--output` в подсказке продолжения должен стать абсолютным —
+    /// подсказка может пригодиться из другого рабочего каталога (например, в логе cron).
+    #[test]
+    fn resume_command_uses_the_absolute_output_path() {
+        let cmd = resume_command("e1", Some(Path::new("reviews.jsonl")));
+        assert!(!cmd.contains("get e1 --output reviews.jsonl"), "{cmd}");
+        let expected = path_text(Path::new("reviews.jsonl"));
+        assert_eq!(
+            cmd,
+            format!("aplaut exports get e1 --output {}", shell_word(&expected))
+        );
+    }
+
+    #[test]
+    fn resume_command_without_output_just_waits() {
+        assert_eq!(resume_command("e1", None), "aplaut exports get e1 --wait");
     }
 }

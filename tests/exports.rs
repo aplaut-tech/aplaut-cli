@@ -105,7 +105,7 @@ fn input_errors_are_caught_before_the_network() {
     let dir = TempDir::new("exports-local");
     let missing_dir = dir.path().join("no-such-dir").join("r.jsonl");
     let missing = missing_dir.to_str().unwrap();
-    let cases: [(&[&str], &str, &str); 9] = [
+    let cases: [(&[&str], &str, &str); 10] = [
         (&["exports", "create"], "missing_attribute", "records_type"),
         (
             &["exports", "create", "--records-type", "bogus"],
@@ -189,6 +189,18 @@ fn input_errors_are_caught_before_the_network() {
             "usage",
             "wait_timeout",
         ),
+        (
+            &[
+                "exports",
+                "create",
+                "--records-type",
+                "reviews",
+                "--output",
+                "-",
+            ],
+            "usage",
+            "output",
+        ),
     ];
     for (args, code, field) in cases {
         local_error(&server, &run(&server, args, ""), code, field);
@@ -259,6 +271,38 @@ fn output_into_a_missing_directory_is_refused_before_the_network() {
         "",
     );
     local_error(&server, &out, "usage", "output");
+}
+
+/// Review Focus (M2): каталог есть, но писать в него нельзя (только чтение) — задача не должна
+/// создаться и потратить минутное окно, скачивание в конце тоже не должно быть первым, кто это заметит.
+#[test]
+#[cfg(unix)]
+fn output_into_an_unwritable_directory_is_refused_before_the_network() {
+    use std::os::unix::fs::PermissionsExt;
+    let server = MockServer::start(vec![]);
+    let dir = TempDir::new("exports-ro");
+    let ro = dir.path().join("ro");
+    std::fs::create_dir(&ro).unwrap();
+    std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let target = ro.join("reviews.jsonl");
+    let out = run(
+        &server,
+        &[
+            "exports",
+            "create",
+            "--records-type",
+            "reviews",
+            "--output",
+            target.to_str().unwrap(),
+        ],
+        "",
+    );
+    std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(out.code, 1, "{}", out.stderr);
+    let err = out.error_json();
+    assert_eq!(err["error"]["code"], "io_error", "{err}");
+    assert_eq!(err["error"]["field"], "output", "{err}");
+    assert!(server.requests().is_empty(), "ошибка ловится до сети");
 }
 
 #[test]
@@ -335,6 +379,44 @@ fn create_with_output_downloads_without_the_token() {
     assert!(requests[0].header("authorization").is_some());
 }
 
+/// Review Focus (M3): сервер отдаёт gzip то как `application/gzip`, то как `application/x-gzip`
+/// (валидатор вложений сервера принимает оба) — оба должны распаковываться.
+#[test]
+fn x_gzip_content_type_is_unpacked_too() {
+    let server = MockServer::start_with(|origin| {
+        vec![
+            reply(
+                201,
+                "completed",
+                json!({"archive_url": format!("{origin}/export_data/a.jsonl.gz"),
+                       "archive_content_type": "application/x-gzip", "archive_size": 12,
+                       "finished_at": "2026-09-28T09:52:37.401+03:00"}),
+            ),
+            Reply::Http {
+                status: 200,
+                headers: vec![],
+                body: gzip("{\"id\":\"r1\"}\n"),
+            },
+        ]
+    });
+    let dir = TempDir::new("exports-x-gzip");
+    let dest = dir.path().join("reviews.jsonl");
+    envelope(&run(
+        &server,
+        &[
+            "exports",
+            "create",
+            "--records-type",
+            "reviews",
+            "--output",
+            dest.to_str().unwrap(),
+            "--json",
+        ],
+        "",
+    ));
+    assert_eq!(std::fs::read_to_string(&dest).unwrap(), "{\"id\":\"r1\"}\n");
+}
+
 #[test]
 fn get_reports_the_state_and_wait_turns_failures_into_errors() {
     let rejected = || {
@@ -403,6 +485,49 @@ fn text_mode_says_how_to_wait_for_the_file() {
     assert!(
         out.stderr.contains("e1") && out.stderr.contains("aplaut exports get e1 --output"),
         "{}",
+        out.stderr
+    );
+}
+
+/// Review Focus (M8): id печатается до ожидания, не только в итоговом сообщении — иначе
+/// `timeout 600 aplaut exports create … --wait`, оборвавшись по таймауту обёртки, не оставляет
+/// способа продолжить без новой задачи (минутное окно уже потрачено).
+#[test]
+fn text_mode_prints_the_id_before_waiting_starts() {
+    let server = MockServer::start(vec![reply(201, "completed", json!({"finished_at": "x"}))]);
+    let out = run(
+        &server,
+        &["exports", "create", "--records-type", "reviews", "--wait"],
+        "",
+    );
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    assert!(
+        out.stderr.contains("экспорт e1") && out.stderr.contains("aplaut exports get e1 --wait"),
+        "{}",
+        out.stderr
+    );
+}
+
+/// Review Focus (M8): под --json строка ожидания не должна попасть в stderr — там только конверт.
+#[test]
+fn json_mode_does_not_print_the_wait_announcement() {
+    let server = MockServer::start(vec![reply(201, "completed", json!({"finished_at": "x"}))]);
+    let out = run(
+        &server,
+        &[
+            "exports",
+            "create",
+            "--records-type",
+            "reviews",
+            "--wait",
+            "--json",
+        ],
+        "",
+    );
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    assert!(
+        !out.stderr.contains("ожидание начато"),
+        "stderr под --json — только конверт: {}",
         out.stderr
     );
 }
