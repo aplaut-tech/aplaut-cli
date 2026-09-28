@@ -464,25 +464,36 @@ fn format_flags(args: &Map<String, Value>, argv: &mut Vec<OsString>) -> Result<(
     Ok(())
 }
 
-/// Атрибуты — JSON-объектом в stdin (`--data -`, M10); проверяет их дочерний CLI (M11).
-fn write_flags(
+/// Атрибуты — JSON-объектом в стдин `--data -` (M10, §6): args, отфильтрованные по списку атрибутов
+/// инструмента, флаг добавляется в argv тут же. Общее для `write_flags` и `export_flags`.
+fn attributes_to_stdin(
     tool: &ToolDef,
     args: &Map<String, Value>,
     argv: &mut Vec<OsString>,
-) -> Result<String, CliError> {
+) -> String {
     let data: Map<String, Value> = args
         .iter()
         .filter(|(key, _)| tool.attributes.contains(&key.as_str()))
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
     push_flag(argv, "data", "-");
+    Value::Object(data).to_string()
+}
+
+/// Атрибуты — JSON-объектом в stdin (`--data -`, M10); проверяет их дочерний CLI (M11).
+fn write_flags(
+    tool: &ToolDef,
+    args: &Map<String, Value>,
+    argv: &mut Vec<OsString>,
+) -> Result<String, CliError> {
+    let stdin = attributes_to_stdin(tool, args, argv);
     if boolean(args, "dry_run")? {
         argv.push("--dry-run".into());
     }
     if boolean(args, "upsert")? {
         argv.push("--upsert".into());
     }
-    Ok(Value::Object(data).to_string())
+    Ok(stdin)
 }
 
 /// `exports_*` (спека writes-and-exports §6): атрибуты create — JSON-ом в stdin, флаги — одним токеном;
@@ -493,17 +504,7 @@ fn export_flags(
     cwd: &Path,
     argv: &mut Vec<OsString>,
 ) -> Result<Option<String>, CliError> {
-    let stdin = if tool.attributes.is_empty() {
-        None
-    } else {
-        let data: Map<String, Value> = args
-            .iter()
-            .filter(|(key, _)| tool.attributes.contains(&key.as_str()))
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
-        push_flag(argv, "data", "-");
-        Some(Value::Object(data).to_string())
-    };
+    let stdin = (!tool.attributes.is_empty()).then(|| attributes_to_stdin(tool, args, argv));
     if let Some(filter) = string(args, "filter")? {
         push_flag(argv, "filter", &filter);
     }
