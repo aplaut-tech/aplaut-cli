@@ -116,6 +116,21 @@ fn task_is_read_in_the_server_shape() {
     );
 }
 
+/// Review Focus (M5): id уже прочитан из ответа, задача на сервере, скорее всего, существует — ошибка
+/// разбора остальных полей не должна его терять.
+#[test]
+fn bad_response_from_unparsable_attributes_keeps_the_task_id() {
+    let err = ExportTask::from_record(&json!({
+        "id": "e1", "type": "export_tasks",
+        "attributes": {"archive_size": "not-a-number"}
+    }))
+    .unwrap_err();
+    assert_eq!(err.code, "bad_response");
+    let hint = err.hint.unwrap();
+    assert!(hint.contains("e1"), "{hint}");
+    assert!(hint.contains("aplaut exports get e1"), "{hint}");
+}
+
 #[test]
 fn wait_polls_with_a_growing_interval_until_completed() {
     let server = MockServer::start(vec![
@@ -227,7 +242,34 @@ fn rejected_task_reports_the_server_message_and_jq_hint() {
     .unwrap_err();
     assert_eq!(err.code, "export_rejected");
     assert!(err.message.contains("undefined method"), "{}", err.message);
-    assert!(err.hint.unwrap().contains("массив"));
+    let hint = err.hint.unwrap();
+    assert!(hint.contains("массив"), "{hint}");
+    assert!(hint.contains("--filter"), "{hint}");
+}
+
+/// Ruling I1: лимит записей (500 000, у товаров — 800 000) — часть общей подсказки rejected, не
+/// только у jq-случая.
+#[test]
+fn rejected_non_tabular_task_hints_at_narrowing_with_filter() {
+    let server = MockServer::start(vec![reply(
+        "rejected",
+        json!({"error_message": "Can't export N records, the limit is 500000.", "finished_at": "x"}),
+    )]);
+    let mut h = harness(&server, 0);
+    let err = export::wait(
+        &mut h.api,
+        h.clock.as_ref(),
+        &h.reporter,
+        waiting(),
+        Duration::from_secs(60),
+        RESUME,
+    )
+    .unwrap_err();
+    assert_eq!(err.code, "export_rejected");
+    let hint = err.hint.unwrap();
+    assert!(hint.contains("--filter"), "{hint}");
+    assert!(hint.contains("500 000"), "{hint}");
+    assert!(hint.contains("800 000"), "{hint}");
 }
 
 #[test]
@@ -247,7 +289,11 @@ fn refused_task_explains_the_quota_and_other_states_count_as_rejected() {
     )
     .unwrap_err();
     assert_eq!(err.code, "export_refused");
-    assert!(err.message.contains("квота"), "{}", err.message);
+    assert!(err.message.contains("запрещён"), "{}", err.message);
+    let hint = err.hint.unwrap();
+    assert!(hint.contains("настройках компании"), "{hint}");
+    assert!(hint.contains("support@aplaut.com"), "{hint}");
+    assert!(!hint.contains("завтра"), "{hint}");
     let server = MockServer::start(vec![reply("archived", json!({"finished_at": "x"}))]);
     let mut h = harness(&server, 0);
     let err = export::wait(
@@ -311,6 +357,24 @@ fn non_gzip_archive_is_saved_as_is() {
     assert_eq!(std::fs::read(&dest).unwrap(), body);
 }
 
+/// Review Focus (I2): успешное скачивание перезаписывает существующий PATH (как `curl -o`) и не
+/// оставляет временный файл рядом.
+#[test]
+fn successful_download_overwrites_an_existing_file() {
+    let server = MockServer::start(vec![raw(200, b"new bytes".to_vec())]);
+    let dir = TempDir::new("dl-overwrite");
+    let dest = dir.path().join("reviews.jsonl");
+    std::fs::write(&dest, "old bytes").unwrap();
+    let url = format!("{}/export_data/a.jsonl", server.origin());
+    download::download(&url, false, &dest, TIMEOUTS).unwrap();
+    assert_eq!(std::fs::read(&dest).unwrap(), b"new bytes");
+    assert_eq!(
+        std::fs::read_dir(dir.path()).unwrap().count(),
+        1,
+        "временный файл не остался"
+    );
+}
+
 /// Review Focus: токен не уходит на хост хранилища — и после редиректа.
 #[test]
 fn archive_request_carries_no_authorization_even_after_a_redirect() {
@@ -360,11 +424,52 @@ fn broken_gzip_is_a_bad_response_and_http_errors_keep_their_status() {
     let err = download::download(&url, true, &dest, TIMEOUTS).unwrap_err();
     assert_eq!(err.code, "bad_response");
     assert!(!dest.exists());
+    assert_eq!(
+        std::fs::read_dir(dir.path()).unwrap().count(),
+        0,
+        "временный файл не остался"
+    );
     let server = MockServer::start(vec![Reply::text(404, "NoSuchKey")]);
     let url = format!("{}/export_data/gone.jsonl.gz", server.origin());
     let err = download::download(&url, true, &dest, TIMEOUTS).unwrap_err();
     assert_eq!(err.code, "http_404");
     assert!(!dest.exists());
+}
+
+/// Review Focus (M4): gzip оборван в середине, но HTTP-ответ целиком дошёл (Content-Length совпал с
+/// присланными байтами, соединение закрылось штатно) — раньше это выглядело как обрыв сети
+/// (`network_error`, retryable), хотя дело в архиве: сузить фильтр или повторить попозже не поможет,
+/// нужна новая выгрузка.
+#[test]
+fn gzip_cut_mid_stream_is_bad_response_not_network_error() {
+    let full = gzip("{\"id\":\"r1\"}\n{\"id\":\"r2\"}\n{\"id\":\"r3\"}\n");
+    let half = full[..full.len() / 2].to_vec();
+    let server = MockServer::start(vec![raw(200, half)]);
+    let dir = TempDir::new("dl-cut-gzip");
+    let dest = dir.path().join("reviews.jsonl");
+    let url = format!("{}/export_data/a.jsonl.gz", server.origin());
+    let err = download::download(&url, true, &dest, TIMEOUTS).unwrap_err();
+    assert_eq!(err.code, "bad_response", "{}", err.message);
+    assert!(!err.retryable);
+    assert!(!dest.exists());
+}
+
+/// Review Focus (M4): настоящий обрыв соединения раньше заявленного Content-Length должен остаться
+/// network_error/timeout даже при gzip — не спутать с битым архивом (ошибка ureq здесь не
+/// оборачивается в ureq::Error, см. is_from_ureq в download.rs).
+#[test]
+fn real_disconnect_with_gzip_stays_network_error_or_timeout() {
+    let server = MockServer::start(vec![Reply::Truncated(Duration::ZERO)]);
+    let dir = TempDir::new("dl-cut-real");
+    let dest = dir.path().join("reviews.jsonl");
+    let url = format!("{}/export_data/a.jsonl.gz", server.origin());
+    let err = download::download(&url, true, &dest, TIMEOUTS).unwrap_err();
+    assert!(
+        ["network_error", "timeout"].contains(&err.code.as_str()),
+        "{}",
+        err.code
+    );
+    assert!(err.retryable);
 }
 
 /// Review Focus (fix round 1, finding 1): ureq 3.4 заворачивает обрыв тела по таймауту в

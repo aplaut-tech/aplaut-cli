@@ -21,12 +21,17 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
         file.write_all(bytes)?;
         file.sync_all()?;
         fs::rename(&tmp, path)?;
-        File::open(parent_dir(path))?.sync_all()
+        sync_parent_dir(path)
     })();
     if result.is_err() {
         let _ = fs::remove_file(&tmp);
     }
     result
+}
+
+/// Каталог `path` после `fsync`-а файла: переименование должно пережить сбой.
+pub fn sync_parent_dir(path: &Path) -> io::Result<()> {
+    File::open(parent_dir(path))?.sync_all()
 }
 
 pub fn ensure_private_dir(dir: &Path) -> io::Result<()> {
@@ -48,7 +53,9 @@ fn parent_dir(path: &Path) -> PathBuf {
     }
 }
 
-fn tmp_path(path: &Path) -> PathBuf {
+/// Имя временного файла рядом с `path`: скрытое (точка), с pid процесса — не совпадёт с другим
+/// параллельным запуском, пишущим туда же (например, перекрывающиеся запуски из cron).
+pub fn tmp_path(path: &Path) -> PathBuf {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())

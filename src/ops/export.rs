@@ -51,8 +51,15 @@ impl ExportTask {
         } else {
             attributes
         };
-        let task: ExportTask = serde_json::from_value(attributes)
-            .map_err(|e| bad_response(&format!("задача экспорта не разобралась: {e}")))?;
+        let task: ExportTask = serde_json::from_value(attributes).map_err(|e| {
+            // Ruling M5 финальной ревизии (2026-09-28): id уже прочитан из ответа сервера — задача,
+            // скорее всего, создана (POST) или точно существует (GET); не терять его в ошибке разбора
+            // остальных полей, иначе агент не узнает, чем в итоге кончилась выгрузка.
+            bad_response(&format!("задача экспорта не разобралась: {e}")).with_hint(format!(
+                "id задачи — {id}; проверить её — aplaut exports get {}",
+                crate::term::shell_word(id)
+            ))
+        })?;
         Ok(ExportTask {
             id: id.to_string(),
             ..task
@@ -166,24 +173,38 @@ fn rejected(task: &ExportTask) -> CliError {
         ),
     };
     let tabular = matches!(task.format.as_deref(), Some("csv" | "xlsx"));
+    // Хард-лимиты записей (код сервера, 2026-09-28, app/models/exports/export_*_task.rb): reviews,
+    // questions, consumers, orders — 500 000, products — 800 000; сверх лимита сервер сам заканчивает
+    // задачу `rejected` с текстом «Can't export N records, the limit is 500000.» — сузить выборку
+    // может только `--filter`.
+    let generic = format!(
+        "сузьте выгрузку --filter (лимит записей: 500 000, у товаров — 800 000) или создайте задачу \
+заново позже; если ошибка повторяется — сообщите в поддержку (support@aplaut.com), id задачи {}",
+        task.id
+    );
     let hint = if tabular && task.export_format.is_some() {
-        "jq-фильтр (--jq) у csv и xlsx должен вернуть массив, например [.id, .rating]; объект сервер отклоняет"
-            .to_string()
-    } else {
         format!(
-            "создайте задачу заново позже; если ошибка повторяется — сообщите в поддержку (support@aplaut.com), id задачи {}",
-            task.id
+            "jq-фильтр (--jq) у csv и xlsx должен вернуть массив, например [.id, .rating]; объект \
+сервер отклоняет; {generic}"
         )
+    } else {
+        generic
     };
     CliError::general("export_rejected", message).with_hint(hint)
 }
 
-/// `refused` (в спеке API — `suspended`): дневная квота компании или задача не стартовала за сутки (§9).
+/// `refused` (в спеке API — `suspended`): экспорт выключен в настройках компании
+/// (`export_forbidden_in_company_settings`) или задача не стартовала за сутки
+/// (`maximum_time_to_start_exceeded`) (код сервера, 2026-09-28,
+/// `app/interactors/exports/create_and_start_export_task.rb:54-81`). Превышение 60-минутной дневной
+/// квоты экспорта компании само по себе задачу не отклоняет — она лишь уходит в низкоприоритетную
+/// очередь `exports_lp` и выполняется медленнее; это не `refused`.
 fn refused(task: &ExportTask) -> CliError {
     let (reason, hint) = match task.refuse_reason.as_deref() {
         Some("export_forbidden_in_company_settings") => (
-            "исчерпана дневная квота экспорта (60 минут выгрузки на компанию в сутки)".to_string(),
-            "повторите завтра или сузьте выгрузку фильтром".to_string(),
+            "экспорт запрещён в настройках компании".to_string(),
+            "включите экспорт в настройках компании или напишите в поддержку (support@aplaut.com)"
+                .to_string(),
         ),
         Some("maximum_time_to_start_exceeded") => (
             "задача ждала запуска дольше суток".to_string(),

@@ -1,17 +1,22 @@
 //! Скачивание архива экспорта (спека writes-and-exports R9; §9). Ссылка хранилища публичная, поэтому
 //! `Authorization` туда не уходит: у клиента скачивания токена нет вовсе. gzip распаковывается потоком,
-//! файл появляется атомарно: `PATH.aplaut-tmp` → `fsync` → `rename`; при сбое прежний `PATH` не тронут.
+//! файл появляется атомарно: временный файл рядом с `PATH` (имя — `fsutil::tmp_path`, с pid процесса,
+//! `create_new`) → `fsync` файла → `rename` в `PATH` → `fsync` каталога; при сбое прежний `PATH` не
+//! тронут, временный файл удаляется. Pid в имени, а не фиксированный `PATH.aplaut-tmp` (было раньше,
+//! ruling I1 финальной ревизии, 2026-09-28): два параллельных запуска с одним `--output` (например,
+//! перекрывающиеся вызовы из cron) иначе делили бы один inode — один процесс мог переименовать
+//! недописанный файл другого, оставляя дыры из нулей или ещё дозаписываемые данные под именем `PATH`.
 
-use std::ffi::OsString;
-use std::fs::{self, File};
+use std::fs::{self, OpenOptions};
 use std::io::{self, BufWriter, ErrorKind, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use flate2::read::MultiGzDecoder;
 
 use crate::auth::url_is_loopback;
 use crate::error::CliError;
+use crate::fsutil;
 
 /// Хранилище может перенаправлять (http → https); больше — признак ошибки.
 const MAX_REDIRECTS: u32 = 5;
@@ -64,9 +69,15 @@ fn write_atomically(
     host: &str,
     gzip: bool,
 ) -> Result<u64, CliError> {
-    let tmp = tmp_path(dest);
+    let tmp = fsutil::tmp_path(dest);
+    // Остаток от упавшего процесса с тем же pid (маловероятно, но безобиднее убрать) мешал бы
+    // create_new; чужой параллельный процесс — с другим pid, у него другое имя.
+    let _ = fs::remove_file(&tmp);
     let result = (|| {
-        let file = File::create(&tmp)
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
             .map_err(|e| CliError::io(&format!("создание {}", tmp.display()), &e))?;
         let mut out = BufWriter::new(file);
         let written = copy(reader, &mut out, host, gzip, &tmp)?;
@@ -77,6 +88,8 @@ fn write_atomically(
             .map_err(|e| CliError::io(&format!("запись {}", tmp.display()), &e))?;
         fs::rename(&tmp, dest)
             .map_err(|e| CliError::io(&format!("переименование в {}", dest.display()), &e))?;
+        fsutil::sync_parent_dir(dest)
+            .map_err(|e| CliError::io(&format!("fsync каталога для {}", dest.display()), &e))?;
         Ok(written)
     })();
     if result.is_err() {
@@ -108,11 +121,22 @@ fn copy(
     }
 }
 
+/// Ruling M4 финальной ревизии (2026-09-28): обрезанный, пустой или с мусором в хвосте gzip
+/// заканчивается у `flate2` `UnexpectedEof` — тем же `ErrorKind`, которым обрывается и настоящий разрыв
+/// соединения раньше заявленного `Content-Length`. Различаем по источнику (`is_from_ureq`): настоящий
+/// обрыв — от `ureq`, битый архив — ошибка, которую сам `flate2` строит из нехватки байт в уже
+/// полностью полученном теле. Только `UnexpectedEof` не от `ureq` и только при `gzip: true` (иначе
+/// `xlsx` без распаковки никогда не читает поток настолько, чтобы поймать такую ошибку) — это битый
+/// архив, не сеть.
 fn read_error(host: &str, gzip: bool, err: &io::Error) -> CliError {
     match err.kind() {
         ErrorKind::InvalidData | ErrorKind::InvalidInput if gzip => CliError::general(
             "bad_response",
             format!("архив экспорта с {host} повреждён: {err}"),
+        ),
+        ErrorKind::UnexpectedEof if gzip && !is_from_ureq(err) => CliError::general(
+            "bad_response",
+            format!("архив экспорта с {host} повреждён (обрезан): {err}"),
         ),
         _ if is_body_timeout(err) => CliError::general(
             "timeout",
@@ -127,16 +151,28 @@ fn read_error(host: &str, gzip: bool, err: &io::Error) -> CliError {
     }
 }
 
+fn ureq_error(err: &io::Error) -> Option<&ureq::Error> {
+    err.get_ref().and_then(|e| e.downcast_ref::<ureq::Error>())
+}
+
+/// Обрыв тела раньше заявленного `Content-Length` — тоже от `ureq`, но НЕ виден через downcast:
+/// `ureq::Error::disconnected` (ureq 3.4.2, `src/error.rs`) заворачивает его как `Error::Io(io::Error)`,
+/// а `Error::into_io()` для варианта `Io` отдаёт этот `io::Error` как есть, без обёртки `ureq::Error`
+/// (в отличие от `Error::Timeout`, который `into_io()` заворачивает в `io::Error::other(self)` — см.
+/// `is_body_timeout`). Единственный устойчивый признак — фиксированный текст ureq для этого случая,
+/// "Peer disconnected"; проверено на стенде теста (`MockServer::Truncated`): битый gzip (`flate2`)
+/// говорит другими словами ("incomplete deflate stream" и т.п.), с сетью не пересекается.
+fn is_from_ureq(err: &io::Error) -> bool {
+    ureq_error(err).is_some() || err.to_string().contains("Peer disconnected")
+}
+
 /// ureq 3.4 заворачивает обрыв тела по `--wait-timeout` не в `ErrorKind::TimedOut`, а в
 /// `io::Error::other(ureq::Error::Timeout(_))` (`Error::into_io`, у чтения тела всегда так —
 /// `Error::Io` тут нет): код `ErrorKind` при этом `Other`. Распаковываем исходную ошибку явно;
 /// `ErrorKind::TimedOut` оставлен как запасной вариант на случай других источников чтения.
 fn is_body_timeout(err: &io::Error) -> bool {
     err.kind() == ErrorKind::TimedOut
-        || err
-            .get_ref()
-            .and_then(|e| e.downcast_ref::<ureq::Error>())
-            .is_some_and(|e| matches!(e, ureq::Error::Timeout(_)))
+        || ureq_error(err).is_some_and(|e| matches!(e, ureq::Error::Timeout(_)))
 }
 
 fn transport(host: &str, err: &ureq::Error) -> CliError {
@@ -145,12 +181,6 @@ fn transport(host: &str, err: &ureq::Error) -> CliError {
         _ => "network_error",
     };
     CliError::general(code, format!("архив экспорта не скачан с {host}: {err}")).retryable(true)
-}
-
-fn tmp_path(dest: &Path) -> PathBuf {
-    let mut name = OsString::from(dest.as_os_str());
-    name.push(".aplaut-tmp");
-    PathBuf::from(name)
 }
 
 /// Хост для сообщений: путь и query ссылки не печатаем — ссылка сама по себе даёт доступ к данным.
