@@ -154,6 +154,24 @@ fn check_wait(wait: &ExportWait) -> Result<(), CliError> {
     let Some(output) = &wait.output else {
         return Ok(());
     };
+    // "missing/" или "existing_file/": trailing-separator путь всегда адресует каталог, даже если
+    // Path::parent() (пустой для такого пути) и is_dir() (ложь, если каталога нет или это файл) этого
+    // не видят — без явной проверки задача создалась бы, а скачивание упало бы на io_error.
+    if output
+        .as_os_str()
+        .as_encoded_bytes()
+        .last()
+        .is_some_and(|&b| std::path::is_separator(b as char))
+    {
+        return Err(CliError::usage(
+            "usage",
+            format!(
+                "--output {}: путь оканчивается разделителем каталогов, а нужен путь к файлу",
+                output.display()
+            ),
+        )
+        .with_field("output"));
+    }
     if output.is_dir() {
         return Err(CliError::usage(
             "usage",

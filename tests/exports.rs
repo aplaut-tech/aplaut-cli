@@ -239,6 +239,26 @@ fn output_into_a_missing_directory_is_refused_before_the_network() {
         "",
     );
     local_error(&server, &out, "usage", "output");
+    // Трейлинг-слэш: без него --output missing/reviews.jsonl уже поймано выше, но
+    // "missing/" сам по себе не должен создать задачу и потратить минутное окно.
+    let trailing = format!(
+        "{}{}",
+        dir.path().join("missing").display(),
+        std::path::MAIN_SEPARATOR
+    );
+    let out = run(
+        &server,
+        &[
+            "exports",
+            "create",
+            "--records-type",
+            "reviews",
+            "--output",
+            &trailing,
+        ],
+        "",
+    );
+    local_error(&server, &out, "usage", "output");
 }
 
 #[test]
