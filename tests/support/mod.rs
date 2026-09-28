@@ -218,7 +218,17 @@ pub struct MockServer {
 
 impl MockServer {
     pub fn start(replies: Vec<Reply>) -> MockServer {
+        MockServer::serve(TcpListener::bind("127.0.0.1:0").unwrap(), replies)
+    }
+
+    /// Сервер, ответы которого зависят от его адреса: ссылка в ответе API ведёт на него же.
+    pub fn start_with(replies: impl FnOnce(&str) -> Vec<Reply>) -> MockServer {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        MockServer::serve(listener, replies(&origin))
+    }
+
+    fn serve(listener: TcpListener, replies: Vec<Reply>) -> MockServer {
         let addr = listener.local_addr().unwrap();
         let requests = Arc::new(Mutex::new(Vec::new()));
         let stop = Arc::new(AtomicBool::new(false));

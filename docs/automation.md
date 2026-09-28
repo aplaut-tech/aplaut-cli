@@ -12,7 +12,7 @@ MCP-клиентам удобнее `aplaut mcp`: те же команды ин�
 | `--json` | итог и ошибка — одной строкой JSON; предупреждения — в `warnings`, а не текстом; включает `--no-input` |
 | `--no-input` | ничего не спрашивать: вместо вопроса — ошибка с подсказкой, какой флаг передать |
 | `--yes` (`-y`) | подтвердить удаление без вопроса (`profile delete`) |
-| `--dry-run` (`-n`) | у `profile set/delete`, `auth login/logout`, `reviews create/comment/update`, `products create/update`, `questions create/update`, `consumers create/update`, `orders create/update`, `self update`: всё проверить и вернуть план в `result`, ничего не меняя |
+| `--dry-run` (`-n`) | у `profile set/delete`, `auth login/logout`, `reviews create/comment/update`, `products create/update`, `questions create/update`, `consumers create/update`, `orders create/update`, `exports create`, `self update`: всё проверить и вернуть план в `result`, ничего не меняя |
 
 ## JSON-конверт
 
@@ -46,6 +46,16 @@ MCP-клиентам удобнее `aplaut mcp`: те же команды ин�
 | 7 | rate limit, повторы исчерпаны |
 | 8 | нужно подтверждение: повторите с `--yes` |
 
+## Выгрузка файлом по расписанию
+
+```bash
+# crontab: ночная выгрузка отзывов за сутки одним файлом; 0 — файл на месте, иначе — код и JSON-ошибка
+15 3 * * * aplaut exports create --records-type reviews --filter updated_at:gte:$(date -u -d yesterday +\%FT00:00:00Z) --output /data/reviews.jsonl --json >> /var/log/aplaut.log 2>&1
+```
+
+Файл появляется атомарно: при сбое прежний остаётся на месте. `export_wait_timeout` повторим — задача
+продолжается на сервере, `aplaut exports get <id> --output …` скачает её без новой задачи.
+
 ## Коды ошибок
 
 | Код | Выход | Когда |
@@ -69,6 +79,7 @@ MCP-клиентам удобнее `aplaut mcp`: те же команды ин�
 | `invalid_data` | 2 | `--data` не читается, не JSON-объект или обёрнут в `data` |
 | `stdin_conflict` | 2 | `--data -` вместе с токеном из stdin |
 | `nothing_to_update` | 2 | `update` без единого атрибута |
+| `jq_needs_csv_or_xlsx` | 2 | `--jq` с форматом `jsonl`: сервер применяет jq только к `csv` и `xlsx` |
 | `invalid_profile` | 2 | недопустимое имя профиля |
 | `invalid_base_url` | 2 | base URL не разбирается |
 | `insecure_base_url` | 2 | `http://` не для localhost |
@@ -103,7 +114,7 @@ MCP-клиентам удобнее `aplaut mcp`: те же команды ин�
 | `server_error` | 1 | 5xx; у 503 — `retry_after`. У `self update` — 5xx GitHub API, `retry_after` — `null` |
 | `request_outcome_unknown` | 1 | запись (POST или PUT со сменой `external_id`) оборвалась после отправки — таймаут, обрыв, 5xx кроме 503: неизвестно, выполнена ли она; CLI не повторяет, в `hint` — как проверить |
 | `unexpected_redirect` | 1 | 3xx: редиректы не выполняются |
-| `http_<status>` | 1 | прочие ответы HTTP без своего кода, например `http_409` |
+| `http_<status>` | 1 | прочие ответы HTTP без своего кода, например `http_409`; у скачивания архива экспорта — любой не-2xx ответ хранилища, например `http_403`, `http_404` (выход 1, не `forbidden`/`not_found`) |
 | `timeout` | 1 | нет ответа за `--timeout` после повторов |
 | `network_error` | 1 | сеть или TLS после повторов |
 | `response_too_large` | 1 | ответ больше допустимого |

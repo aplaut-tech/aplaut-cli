@@ -43,6 +43,14 @@ const GET_NOTE: &str = "Запись — во втором блоке ответ
 const WRITE_NOTE: &str = "Атрибуты — параметрами; обязательность и значения проверяет aplaut до \
 отправки (missing_attribute, invalid_attribute с подсказкой). dry_run: true — проверить и показать \
 запрос, ничего не отправляя.";
+const EXPORT_NOTE: &str = "Итог — в конверте (id, state, archive_url, output_path…), данных во втором блоке \
+нет. Долгий wait может упереться в таймаут MCP-клиента — тогда создайте задачу без wait и опрашивайте \
+exports_get. archive_url открывается без токена: не показывайте его посторонним.";
+const EXPORT_OUTPUT_FILE_HELP: &str = "Скачать готовый файл сюда (путь от рабочего каталога сервера; \
+включает wait): gzip распаковывается, xlsx — как есть. Существующий файл не перезаписывается (см. overwrite)";
+const SEARCH_OPTIONS_HELP: &str =
+    "search_options задачи как есть: saved_search_id, query, свой фильтр-хэш \
+{\"поле\": {\"оператор\": значение}}; параметр filter перекрывает его filter";
 const FORMAT_HELP: &str = "Формат данных: jsonl (по умолчанию: запись со связями из include одной \
 строкой), csv (с fields — самый короткий), raw (страницы JSON:API как есть)";
 const MAX_RECORDS_HELP: &str =
@@ -58,6 +66,8 @@ pub enum Kind {
     Scroll,
     Get,
     Write,
+    /// Экспорт: итог конвертом, данных нет; ожидание и файл.
+    Export,
 }
 
 /// Аннотации MCP (§2.3).
@@ -102,11 +112,14 @@ pub struct ToolDef {
     pub positional: Option<String>,
     /// Атрибуты тела записи — JSON-объектом в `--data -` (M10).
     pub attributes: Vec<&'static str>,
+    /// Глагол меняет данные в API (`Verb::writes`): у `Kind::Export` это верно только для `create`,
+    /// поэтому `Kind` одного вида не всегда пишет.
+    pub writes: bool,
 }
 
 impl ToolDef {
     pub fn writes(&self) -> bool {
-        self.kind == Kind::Write
+        self.writes
     }
 
     /// Имя команды в конверте: `reviews.scroll`.
@@ -176,6 +189,8 @@ fn tool(
         Verb::Get => (Kind::Get, READ_ONLY),
         Verb::Create | Verb::Comment => (Kind::Write, ADDITIVE),
         Verb::Update => (Kind::Write, OVERWRITES),
+        // Создаёт задачу или пишет output_file.
+        Verb::ExportCreate | Verb::ExportGet => (Kind::Export, ADDITIVE),
     };
     let (mut properties, attributes, note) = match kind {
         Kind::Scroll => (scroll_properties(resource, leaf), Vec::new(), SCROLL_NOTE),
@@ -183,6 +198,10 @@ fn tool(
         Kind::Write => {
             let (properties, attributes) = write_properties(resource, verb, leaf);
             (properties, attributes, WRITE_NOTE)
+        }
+        Kind::Export => {
+            let (properties, attributes) = export_properties(resource, verb, leaf);
+            (properties, attributes, EXPORT_NOTE)
         }
     };
     let positional = leaf
@@ -211,6 +230,7 @@ fn tool(
         hints,
         positional,
         attributes,
+        writes: verb.writes(),
     }
 }
 
@@ -306,6 +326,78 @@ fn write_properties(
         );
     }
     (p, spec.attributes.iter().map(|a| a.name).collect())
+}
+
+/// Параметры `exports_*` (спека writes-and-exports §6): у create — атрибуты тела из спеки (в `--data -`) и
+/// флаги команды; у обоих — ожидание и `output_file`.
+fn export_properties(
+    resource: &Resource,
+    verb: Verb,
+    leaf: &clap::Command,
+) -> (Map<String, Value>, Vec<&'static str>) {
+    let mut p = Map::new();
+    let mut attributes = Vec::new();
+    if verb == Verb::ExportCreate {
+        let (spec, _) =
+            write_operation(resource, verb).expect("схема тела есть в спеке (spec_drift)");
+        for attribute in spec.attributes {
+            let description = match attribute.name {
+                "search_options" => SEARCH_OPTIONS_HELP.to_string(),
+                "export_format" => help(leaf, "jq"),
+                name => help(leaf, name),
+            };
+            p.insert(
+                attribute.name.into(),
+                attribute_schema(attribute, false, &description),
+            );
+            attributes.push(attribute.name);
+        }
+        p.insert(
+            "filter".into(),
+            json!({"type": "string", "description": export_filter_help(leaf)}),
+        );
+        p.insert(
+            "survey_id".into(),
+            json!({"type": "string", "description": help(leaf, "survey_id")}),
+        );
+        p.insert(
+            "dry_run".into(),
+            json!({"type": "boolean", "description": help(leaf, "dry_run")}),
+        );
+    }
+    p.insert(
+        "wait".into(),
+        json!({"type": "boolean", "description": help(leaf, "wait")}),
+    );
+    p.insert(
+        "wait_timeout".into(),
+        json!({"type": "integer", "minimum": 1, "description": help(leaf, "wait_timeout")}),
+    );
+    p.insert(
+        "output_file".into(),
+        json!({"type": "string", "description": EXPORT_OUTPUT_FILE_HELP}),
+    );
+    p.insert(
+        "overwrite".into(),
+        json!({"type": "boolean", "description": OVERWRITE_HELP}),
+    );
+    (p, attributes)
+}
+
+/// Справка `--filter` и параметры по типу — из таблиц scroll: у экспорта они те же.
+fn export_filter_help(leaf: &clap::Command) -> String {
+    let params = |records_type| {
+        spec::scroll_spec(records_type)
+            .map(|s| s.filters.join(", "))
+            .unwrap_or_default()
+    };
+    format!(
+        "{}. Параметры: reviews — {}; products — {}; questions — {}. Операторы: reviews — eq, neq, in, gt, gte, lt, lte; questions — без neq; products — eq, gt, gte, lt, lte.",
+        help(leaf, "filter"),
+        params("reviews"),
+        params("products"),
+        params("questions")
+    )
 }
 
 fn attribute_schema(attribute: &AttributeSpec, nullable: bool, help: &str) -> Value {
@@ -439,7 +531,9 @@ mod tests {
                 "consumers_update",
                 "orders_get",
                 "orders_create",
-                "orders_update"
+                "orders_update",
+                "exports_create",
+                "exports_get"
             ]
         );
         assert!(enabled(false).iter().all(|t| !t.writes()));
@@ -575,6 +669,54 @@ mod tests {
     }
 
     #[test]
+    fn export_tools_take_wait_and_output_file_and_create_is_a_write() {
+        let catalog = catalog();
+        let create = find(&catalog, "exports_create");
+        assert!(create.writes() && create.kind == Kind::Export);
+        for name in [
+            "records_type",
+            "format",
+            "export_format",
+            "search_options",
+            "filter",
+            "survey_id",
+            "wait",
+            "wait_timeout",
+            "output_file",
+            "overwrite",
+            "dry_run",
+        ] {
+            assert!(
+                create.properties().contains_key(name),
+                "exports_create.{name}"
+            );
+        }
+        assert_eq!(
+            create.properties()["records_type"]["enum"],
+            json!([
+                "reviews",
+                "products",
+                "questions",
+                "consumers",
+                "orders",
+                "survey_responses"
+            ])
+        );
+        assert!(create.properties()["filter"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("product_id"));
+        let get = find(&catalog, "exports_get");
+        assert!(!get.writes());
+        assert!(
+            get.properties().contains_key("output_file")
+                && !get.properties().contains_key("dry_run")
+        );
+        assert!(enabled(false).iter().any(|t| t.name == "exports_get"));
+        assert!(!enabled(false).iter().any(|t| t.name == "exports_create"));
+    }
+
+    #[test]
     fn required_is_only_the_positional_id() {
         let catalog = catalog();
         for (name, required) in [
@@ -584,6 +726,8 @@ mod tests {
             ("reviews_comment", Some(json!(["review_id"]))),
             ("reviews_update", Some(json!(["id"]))),
             ("products_update", Some(json!(["id"]))),
+            ("exports_get", Some(json!(["id"]))),
+            ("exports_create", None),
         ] {
             let tool = find(&catalog, name);
             assert_eq!(tool.schema.get("required").cloned(), required, "{name}");

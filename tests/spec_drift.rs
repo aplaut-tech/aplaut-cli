@@ -63,6 +63,11 @@ fn every_command_maps_to_a_spec_operation() {
                 spec::write_spec(method, &operation).is_some(),
                 "«{joined}»: нет схемы тела {method} {operation}"
             ),
+            Verb::ExportCreate => assert!(
+                spec::write_spec(method, &operation).is_some(),
+                "«{joined}»: нет схемы тела {method} {operation}"
+            ),
+            Verb::ExportGet => {}
         }
     }
 }

@@ -265,3 +265,82 @@ network_error, timeout.
 Коды выхода: 0 — обновлён или создан (с -n — план); 2 — ошибка во входных данных, до сети;
 3 — нет токена или он отклонён; 5 — заказа нет (без --upsert); 7 — rate limit, повторы
 исчерпаны; 1 — прочие ошибки.";
+
+pub(super) const EXPORTS_CREATE_AFTER_LONG_HELP: &str = "\
+Примеры:
+  # Для cron: создать задачу, дождаться и положить распакованный файл (атомарно).
+  aplaut exports create --records-type reviews --filter updated_at:gte:2026-01-01T00:00:00Z --output reviews.jsonl
+
+  aplaut exports create --records-type products --format xlsx --output products.xlsx
+  aplaut exports create --records-type reviews --format csv --jq '[.id, .rating, .body]' --output reviews.csv
+  aplaut exports create --records-type survey_responses --survey-id 5f1c2a9e8b7d6c5b4a3f2e1d --output answers.jsonl
+  aplaut exports create --records-type reviews -n --json       # показать запрос, не создавая задачу
+
+  # Для агента: создать без ожидания, потом опрашивать exports get.
+  aplaut exports create --records-type orders --json
+
+Типы: reviews, products, questions, consumers, orders, survey_responses (для него обязателен --survey-id).
+Без --filter выгружается всё время, а не 30 дней, как у scroll. --filter — синтаксис и параметры scroll
+того же типа; CLI переводит его в фильтр экспорта. Сервер применяет фильтр только к reviews, products и
+questions: у consumers и orders --filter — ошибка до отправки. Операторы: reviews — eq, neq, in, gt, gte,
+lt, lte; questions — без neq; products — eq, gt, gte, lt, lte. rating — в звёздах, как у scroll. В
+отличие от scroll, product_id:eq не разворачивается на группу товара.
+Форматы: jsonl (по умолчанию: запись на строку, товар, бренд, комментарии вложены), csv, xlsx. --jq —
+jq-фильтр строк для csv и xlsx; он должен вернуть массив ([.id, .rating] → колонки ID, RATING).
+search_options целиком (saved_search_id, query, свой фильтр-хэш) — через --data; --filter и --survey-id
+перекрывают его filter. С -n (--dry-run) токен проверяется, задача не создаётся.
+
+Ожидание и файл: --wait опрашивает задачу (2 с, затем ×1,5, не реже раза в 30 с) до конца или
+--wait-timeout. --output включает --wait и скачивает архив без токена: ссылка публичная, кто её знает —
+скачает файл. gzip распаковывается (xlsx — как есть) в PATH.aplaut-tmp, который переименовывается в PATH;
+существующий PATH перезаписывается, при сбое остаётся прежним.
+
+Лимиты сервера: одна задача в минуту на токен (отклонённая тоже считается) и 60 минут выгрузки на
+компанию в сутки. Вторая задача в ту же минуту ждёт окна (повторы 429 — до 5 минут). Повтор после сбоя
+создал бы вторую задачу: CLI повторяет запрос сам, только если сервер его точно не получил.
+
+JSON (--json):
+  {\"ok\":true,\"command\":\"exports.create\",\"cli_version\":…,\"dry_run\":false,
+   \"result\":{\"request\":{\"method\":\"POST\",\"path\":\"/export_tasks\",\"body\":{…}},\"id\",\"records_type\",
+   \"format\",\"state\",\"archive_url\",\"archive_size\",\"archive_content_type\",\"created_at\",\"started_at\",
+   \"finished_at\",\"error_message\",\"refuse_reason\",\"output_path\"},\"warnings\":[]}
+  state: waiting, processing, completed, rejected, refused. С -n — тот же request, остальные поля null
+  и \"dry_run\":true.
+
+Ошибки: missing_attribute (records_type, survey_id), unknown_attribute, invalid_attribute, invalid_data,
+invalid_filter, jq_needs_csv_or_xlsx, usage (--output, --survey-id, --wait-timeout), stdin_conflict,
+stdin_is_terminal, validation_failed (422, в том числе невалидный jq), export_rejected, export_refused,
+export_wait_timeout (retryable; в hint — exports get), request_outcome_unknown, bad_response, no_token,
+invalid_token, unauthorized, forbidden, rate_limited, server_error, network_error, timeout, http_<status>
+(скачивание), io_error.
+
+Коды выхода: 0 — задача создана (с --wait — готова, с --output — файл на месте; с -n — план);
+2 — ошибка в параметрах, до сети; 3 — нет токена или он отклонён; 7 — rate limit, повторы исчерпаны;
+1 — прочие ошибки, в том числе задача отклонена или не дождались.";
+
+pub(super) const EXPORTS_GET_AFTER_LONG_HELP: &str = "\
+Примеры:
+  aplaut exports get 6aba0eae4b63424b5778e673                          # состояние задачи
+  aplaut exports get 6aba0eae4b63424b5778e673 --output reviews.jsonl   # дождаться и скачать
+
+  # Для агента: опрос без ожидания — state и archive_url в result.
+  aplaut exports get 6aba0eae4b63424b5778e673 --json
+
+Без --wait команда только читает задачу: отклонённая (rejected, refused) — это state в result, а не ошибка.
+С --wait — ожидание, как у exports create, и конечные состояния становятся ошибками. --output включает
+--wait и скачивает архив: ссылка публичная, без токена; gzip распаковывается, xlsx — как есть; файл
+появляется атомарно, существующий перезаписывается. Скачать ещё раз — та же команда: задача не создаётся
+заново, минутное окно не тратится.
+
+JSON (--json):
+  {\"ok\":true,\"command\":\"exports.get\",\"cli_version\":…,\"dry_run\":false,
+   \"result\":{\"id\",\"records_type\",\"format\",\"state\",\"archive_url\",\"archive_size\",
+   \"archive_content_type\",\"created_at\",\"started_at\",\"finished_at\",\"error_message\",\"refuse_reason\",
+   \"output_path\"},\"warnings\":[]}
+
+Ошибки: invalid_id, usage (--output, --wait-timeout), not_found (задачи нет), export_rejected,
+export_refused, export_wait_timeout (retryable), bad_response, no_token, invalid_token, unauthorized,
+forbidden, rate_limited, server_error, network_error, timeout, http_<status> (скачивание), io_error.
+
+Коды выхода: 0 — готово (без --wait — состояние прочитано); 2 — ошибка в параметрах; 3 — нет токена или
+он отклонён; 5 — задачи нет; 7 — rate limit, повторы исчерпаны; 1 — прочие ошибки.";

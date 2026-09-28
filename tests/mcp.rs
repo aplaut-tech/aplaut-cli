@@ -210,7 +210,8 @@ fn read_only_server_lists_scroll_and_get() {
             "questions_scroll",
             "questions_get",
             "consumers_get",
-            "orders_get"
+            "orders_get",
+            "exports_get"
         ]
     );
     assert_eq!(
@@ -252,7 +253,9 @@ fn allow_writes_adds_write_tools() {
             "consumers_update",
             "orders_get",
             "orders_create",
-            "orders_update"
+            "orders_update",
+            "exports_create",
+            "exports_get"
         ]
     );
     assert_eq!(

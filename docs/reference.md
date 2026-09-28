@@ -13,6 +13,7 @@ JSON, ошибками и кодами выхода — `aplaut <ресурс> <
 | `questions` — вопросы | [`scroll`](#scroll), [`get`](#get), [`create`](#questions-create), [`update`](#questions-update) |
 | `consumers` — клиенты (персональные данные) | [`get`](#get), [`create`](#consumers-create), [`update`](#consumers-update) |
 | `orders` — заказы (персональные данные клиента) | [`get`](#get), [`create`](#orders-create), [`update`](#orders-update) |
+| `exports` — экспорт одним файлом | [`create`](#exports-create), [`get`](#exports-get) |
 | [`self`](#self) — сам aplaut | [`update`](#self-update) |
 | [`mcp`](#mcp) — MCP-сервер для агентов | — (`aplaut mcp`) |
 
@@ -578,6 +579,50 @@ aplaut orders update 31337 --consumer-name "Анна Петрова"
 echo '{"order_lines":[{"product_id":"444772","name":"Диск","price":5490}]}' \
   | aplaut orders update 31337 --data -
 ```
+
+## Экспорт: exports
+
+Задача на сервере собирает файл целиком (`jsonl`, `csv`, `xlsx`); CLI ждёт её и скачивает архив. Без
+`--filter` выгружается всё время, а не 30 дней, как у `scroll`. Лимиты сервера: одна задача в минуту на токен
+(отклонённая тоже считается) и 60 минут выгрузки на компанию в сутки.
+
+### exports create
+
+```text
+aplaut exports create --records-type TYPE [--format jsonl|csv|xlsx] [--filter EXPR] [--jq FILTER]
+    [--survey-id ID] [--data FILE|-] [--wait] [--wait-timeout SECONDS] [--output PATH] [-n]
+```
+
+| Флаг | Что делает |
+|---|---|
+| `--records-type TYPE` | `reviews`, `products`, `questions`, `consumers`, `orders`, `survey_responses` |
+| `--format FORMAT` | `jsonl` (по умолчанию: запись на строку, товар и комментарии вложены), `csv`, `xlsx` |
+| `--filter EXPR` | как у `scroll`, те же параметры; только `reviews`, `products`, `questions` — у остальных сервер фильтр не применяет |
+| `--jq FILTER` | jq-фильтр строк для `csv`/`xlsx`; должен вернуть массив: `[.id, .rating]` → колонки `ID`, `RATING` |
+| `--survey-id ID` | опрос для `survey_responses` (для них обязателен) |
+| `--data FILE\|-` | атрибуты задачи JSON-объектом, в том числе `search_options` целиком (`saved_search_id`, `query`) |
+| `--wait` | дождаться конца задачи |
+| `--wait-timeout SECONDS` | сколько ждать задачу и скачивание, по умолчанию 1800 |
+| `--output PATH` | скачать файл (включает `--wait`): gzip распаковывается, `xlsx` — как есть; файл появляется атомарно |
+| `-n`, `--dry-run` | показать запрос, не создавая задачу |
+
+```bash
+aplaut exports create --records-type reviews --filter updated_at:gte:2026-01-01T00:00:00Z --output reviews.jsonl
+aplaut exports create --records-type reviews --format csv --jq '[.id, .rating, .body]' --output reviews.csv
+```
+
+Операторы фильтра: `reviews` — `eq`, `neq`, `in`, `gt`, `gte`, `lt`, `lte`; `questions` — без `neq`; `products` —
+`eq`, `gt`, `gte`, `lt`, `lte`. `rating` — в звёздах, как у `scroll`. `archive_url` в `result` — публичная ссылка:
+файл по ней скачает любой, у кого она есть.
+
+### exports get
+
+```text
+aplaut exports get <ID> [--wait] [--wait-timeout SECONDS] [--output PATH]
+```
+
+Без `--wait` — состояние задачи (`waiting`, `processing`, `completed`, `rejected`, `refused`) в `result`. С `--wait`
+и `--output` — как у `create`; повторное скачивание не создаёт задачу заново.
 
 ## self
 

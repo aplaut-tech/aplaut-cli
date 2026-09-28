@@ -8,10 +8,12 @@ use clap::{Args, Parser, Subcommand};
 
 use crate::output::Format;
 
+mod exports;
 mod help;
 mod help_writes;
 mod writes;
 
+pub use exports::*;
 use help::*;
 use help_writes::*;
 pub use writes::*;
@@ -113,6 +115,12 @@ pub enum Command {
     Orders {
         #[command(subcommand)]
         verb: OrdersVerb,
+    },
+    /// Экспорт одним файлом
+    #[command(arg_required_else_help = true)]
+    Exports {
+        #[command(subcommand)]
+        verb: ExportsVerb,
     },
     /// Токен доступа: сохранить или удалить
     #[command(arg_required_else_help = true)]

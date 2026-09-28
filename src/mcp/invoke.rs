@@ -285,6 +285,13 @@ pub fn plan(
             Some(write_flags(tool, args, &mut argv)?),
             Destination::Inline,
         ),
+        // Временно, до Task 4 плана фазы 2: argv и output_file экспорта.
+        Kind::Export => {
+            return Err(CliError::usage(
+                "usage",
+                format!("{}: инструмент ещё не подключён", tool.name),
+            ))
+        }
     };
     argv.push("--json".into());
     argv.push("--no-input".into());

@@ -9,14 +9,18 @@ pub enum Verb {
     Create,
     Comment,
     Update,
+    /// Экспорт — не глагол записей: итог без данных, своё ожидание и файл (спека writes-and-exports
+    /// §6). Имена — `create` и `get`, как в CLI.
+    ExportCreate,
+    ExportGet,
 }
 
 impl Verb {
     pub fn name(self) -> &'static str {
         match self {
             Verb::Scroll => "scroll",
-            Verb::Get => "get",
-            Verb::Create => "create",
+            Verb::Get | Verb::ExportGet => "get",
+            Verb::Create | Verb::ExportCreate => "create",
             Verb::Comment => "comment",
             Verb::Update => "update",
         }
@@ -25,8 +29,8 @@ impl Verb {
     /// Глагол меняет данные в API: инструмент MCP — только с `--allow-writes` (M5).
     pub fn writes(self) -> bool {
         match self {
-            Verb::Scroll | Verb::Get => false,
-            Verb::Create | Verb::Comment | Verb::Update => true,
+            Verb::Scroll | Verb::Get | Verb::ExportGet => false,
+            Verb::Create | Verb::Comment | Verb::Update | Verb::ExportCreate => true,
         }
     }
 
@@ -41,6 +45,8 @@ impl Verb {
                 format!("/{}/{{id}}/relationships/comments", resource.records_type),
             ),
             Verb::Update => ("PUT", format!("/{}/{{id}}", resource.records_type)),
+            Verb::ExportCreate => ("POST", format!("/{}", resource.records_type)),
+            Verb::ExportGet => ("GET", format!("/{}/{{id}}", resource.records_type)),
         }
     }
 }
@@ -118,7 +124,20 @@ pub static ORDERS: Resource = Resource {
     },
 };
 
-pub static ALL: &[&Resource] = &[&REVIEWS, &PRODUCTS, &QUESTIONS, &CONSUMERS, &ORDERS];
+/// Экспорт одним файлом (спека writes-and-exports §5): задача на сервере, ожидание, скачивание.
+pub static EXPORTS: Resource = Resource {
+    name: "exports",
+    records_type: "export_tasks",
+    verbs: &[Verb::ExportCreate, Verb::ExportGet],
+    noun: Noun {
+        one: "экспорт",
+        genitive: "экспорта",
+    },
+};
+
+pub static ALL: &[&Resource] = &[
+    &REVIEWS, &PRODUCTS, &QUESTIONS, &CONSUMERS, &ORDERS, &EXPORTS,
+];
 
 /// Команды без операции Platform API: локальные файлы, самообновление (`self update` ходит в
 /// GitHub Releases) и MCP-сервер (его инструменты вызывают остальные команды).

@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod consumers;
+pub mod exports;
 pub mod mcp;
 pub mod orders;
 pub mod products;
@@ -23,10 +24,11 @@ use serde::Serialize;
 use crate::api_error::ErrorContext;
 use crate::auth::{EnvSnapshot, StdinSource, TokenFlags, DEFAULT_BASE_URL};
 use crate::cli::{
-    AuthVerb, Command, CommentArgs, ConsumersVerb, CreateConsumerArgs, CreateOrderArgs,
-    CreateProductArgs, CreateQuestionArgs, CreateReviewArgs, GlobalArgs, OrdersVerb, ProductsVerb,
-    ProfileVerb, QuestionsVerb, RecordsVerb, ReviewsVerb, SelfVerb, UpdateConsumerArgs,
-    UpdateInput, UpdateOrderArgs, UpdateProductArgs, UpdateQuestionArgs, UpdateReviewArgs,
+    AuthVerb, Command, CommentArgs, ConsumersVerb, CreateConsumerArgs, CreateExportArgs,
+    CreateOrderArgs, CreateProductArgs, CreateQuestionArgs, CreateReviewArgs, ExportsVerb,
+    GlobalArgs, OrdersVerb, ProductsVerb, ProfileVerb, QuestionsVerb, RecordsVerb, ReviewsVerb,
+    SelfVerb, UpdateConsumerArgs, UpdateInput, UpdateOrderArgs, UpdateProductArgs,
+    UpdateQuestionArgs, UpdateReviewArgs,
 };
 use crate::clock::Clock;
 use crate::config::{self, Paths};
@@ -117,6 +119,7 @@ pub fn dispatch(command: Command, ctx: &Ctx) -> Result<Outcome, CliError> {
         Command::Questions { verb } => questions::run(verb, ctx),
         Command::Consumers { verb } => consumers::run(verb, ctx),
         Command::Orders { verb } => orders::run(verb, ctx),
+        Command::Exports { verb } => exports::run(verb, ctx),
         Command::Auth { verb } => auth::run(verb, ctx),
         Command::Profile { verb } => profile::run(verb, ctx),
         Command::SelfCmd { verb } => self_update::run(verb, ctx),
@@ -185,6 +188,9 @@ pub fn is_dry_run(command: &Command) -> bool {
                     input: UpdateInput { dry, .. },
                     ..
                 }),
+        }
+        | Command::Exports {
+            verb: ExportsVerb::Create(CreateExportArgs { dry, .. }),
         } => dry.dry_run,
         _ => false,
     }
@@ -211,6 +217,13 @@ pub fn command_name(command: &Command) -> String {
                 OrdersVerb::Get(_) => "get",
                 OrdersVerb::Create(_) => "create",
                 OrdersVerb::Update(_) => "update",
+            },
+        ),
+        Command::Exports { verb } => (
+            "exports",
+            match verb {
+                ExportsVerb::Create(_) => "create",
+                ExportsVerb::Get(_) => "get",
             },
         ),
         Command::Auth { verb } => (
