@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Проект
 
 `aplaut` — консольный клиент Aplaut Platform API на Rust (бинарь `aplaut`, библиотека `aplaut_cli`):
-выгрузка и запись отзывов, товаров, вопросов, клиентов и заказов для DWH, cron и агентов. Справка CLI, сообщения,
+выгрузка и запись отзывов, товаров, вопросов, клиентов и заказов, экспорт одним файлом для DWH, cron и агентов. Справка CLI, сообщения,
 документация и комментарии в коде — на русском; сообщения коммитов — на английском, conventional commits
 (`feat:`, `fix:`, `chore:`, `docs:`, `ci:`, `refactor:`, `test:`).
 
@@ -51,6 +51,10 @@ dist plan                                      # что соберёт рели�
 - **update с upsert** (`commands/updates.rs`): у отзывов, вопросов, клиентов и заказов PUT создаёт
   объект, если его нет, — `update` сначала делает `GET` (`not_found` без `--upsert`), затем PUT с
   `Replay::Safe`; `created` — по 201. `create` с внешним id — `writes::create_unique`.
+- **Экспорт** (`commands/exports.rs`): задача `POST /export_tasks` → ожидание (`ops/export.rs`, через `Clock`) → скачивание публичной ссылки без токена
+  (`download.rs`, gzip потоком, tmp + rename). `--filter` в синтаксисе `scroll` переводится в хэш экспорта
+  (`export_filter.rs`): сервер строку понимает только у отзывов. Лимит — 1 задача/мин на ключ, отклонённая тоже
+  считается: проверки до сети.
 - **Scroll** (`ops/scroll.rs`, `state.rs`): курсор не идемпотентен — перед продолжением стейт
   помечается `in_flight`. Стейт пишется атомарно и только в точках фиксации формата
   (`RecordSink::write_page` → `Commit::Durable`): at-least-once, хвост прошлой страницы отсекается по id.

@@ -12,7 +12,8 @@ use crate::cli::{GlobalArgs, McpArgs};
 use crate::error::CliError;
 use crate::mcp::{self, tools, ServerSetup};
 
-const INSTRUCTIONS_HEAD: &str = "Aplaut Platform API: отзывы, товары, вопросы, клиенты, заказы.";
+const INSTRUCTIONS_HEAD: &str =
+    "Aplaut Platform API: отзывы, товары, вопросы, клиенты, заказы, экспорт файлом.";
 
 const INSTRUCTIONS_BODY: &str = "\
 Ответ инструмента: первый текстовый блок — JSON-конверт (ok, command, result или error, warnings), \
@@ -22,7 +23,8 @@ https://github.com/aplaut-tech/aplaut-cli/blob/main/docs/automation.md
 Без filter сервер отдаёт только последние 30 дней (предупреждение default_filter). Выгрузка без \
 output_file — не больше 100 записей за вызов (max_records, по умолчанию 20); со state повторный вызов \
 отдаёт следующую порцию. Больше — в output_file.
-consumers_get и orders_get отдают персональные данные (e-mail, телефон, имя): не пересказывайте их без нужды.";
+consumers_get и orders_get отдают персональные данные (e-mail, телефон, имя): не пересказывайте их без нужды.
+exports_create — одна задача в минуту на токен; archive_url в ответе открывается без токена.";
 
 pub fn run(args: &McpArgs, ctx: &Ctx) -> Result<Outcome, CliError> {
     check_stdin_free(&ctx.global)?;
@@ -187,11 +189,14 @@ mod tests {
             assert!(writes.contains(&name), "нет {name}: {writes}");
         }
         let read_only = instructions(false, target());
+        // Проверяем, что write-инструменты не перечислены в first line (mode line),
+        // но они могут упоминаться в INSTRUCTIONS_BODY в контексте ограничений.
+        let first_line = read_only.lines().next().unwrap_or("");
         assert!(
             tools::names(true)
                 .iter()
-                .all(|name| !read_only.contains(name.as_str())),
-            "{read_only}"
+                .all(|name| !first_line.contains(name.as_str())),
+            "write tools in mode line: {first_line}"
         );
     }
 
@@ -200,6 +205,7 @@ mod tests {
         let text = instructions(false, Ok(("default".into(), "https://x.test/v4".into())));
         assert!(text.contains("персональные данные"), "{text}");
         assert!(text.contains("клиенты, заказы"), "{text}");
+        assert!(text.contains("экспорт файлом"), "{text}");
     }
 
     #[test]

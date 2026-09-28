@@ -4,8 +4,8 @@
 //!   APLAUT_ACCESS_TOKEN_FILE=… cargo test --test e2e -- --ignored --test-threads=1
 //!
 //! Токен — из APLAUT_ACCESS_TOKEN_FILE или APLAUT_ACCESS_TOKEN; адрес стенда в коде не хранится.
-//! Круги записи (`review_*`, `product_*`, `question_*`, `consumer_*`, `order_*`) создают и удаляют
-//! тестовые объекты — только с APLAUT_E2E_WRITES=1.
+//! Круги записи (`review_*`, `product_*`, `question_*`, `consumer_*`, `order_*`), `export_*` — создают и удаляют
+//! тестовые объекты или задачи — только с APLAUT_E2E_WRITES=1.
 
 mod support;
 
@@ -469,6 +469,74 @@ fn order_write_round_trip() {
         line_product.as_str(),
         "PUT частичный"
     );
+}
+
+/// Круг экспорта (спека writes-and-exports §10): задача по свежим отзывам → дождаться → файл на месте →
+/// скачать снова через get без новой задачи. Создаёт задачу на стенде (удалить её API не даёт), поэтому
+/// только с APLAUT_E2E_WRITES=1.
+#[test]
+#[ignore]
+fn export_round_trip() {
+    if !writes_enabled() {
+        return;
+    }
+    let dir = TempDir::new("e2e-export");
+    let first = dir.path().join("reviews.jsonl");
+    let created = json_line(&run(&[
+        "exports",
+        "create",
+        "--records-type",
+        "reviews",
+        "--filter",
+        "updated_at:gte:2026-09-01T00:00:00Z",
+        "--output",
+        first.to_str().unwrap(),
+        "--json",
+    ]));
+    assert_eq!(created["result"]["state"], "completed");
+    let id = created["result"]["id"].as_str().unwrap().to_string();
+    let text = std::fs::read_to_string(&first).unwrap();
+    assert!(text
+        .lines()
+        .all(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["id"].is_string()));
+    let again = dir.path().join("again.jsonl");
+    let got = json_line(&run(&[
+        "exports",
+        "get",
+        &id,
+        "--output",
+        again.to_str().unwrap(),
+        "--json",
+    ]));
+    assert_eq!(got["result"]["id"], id.as_str());
+    assert_eq!(std::fs::read_to_string(&again).unwrap(), text);
+}
+
+/// xlsx приходит без gzip (стейджинг, 2026-09-28): файл — сам xlsx (zip, начинается с «PK»). Вторая задача
+/// подряд: CLI ждёт минутное окно после 429.
+#[test]
+#[ignore]
+fn export_xlsx_is_saved_as_is() {
+    if !writes_enabled() {
+        return;
+    }
+    let dir = TempDir::new("e2e-export-xlsx");
+    let dest = dir.path().join("reviews.xlsx");
+    let out = run(&[
+        "exports",
+        "create",
+        "--records-type",
+        "reviews",
+        "--format",
+        "xlsx",
+        "--filter",
+        "updated_at:gte:2026-09-20T00:00:00Z",
+        "--output",
+        dest.to_str().unwrap(),
+        "--json",
+    ]);
+    json_line(&out);
+    assert_eq!(&std::fs::read(&dest).unwrap()[..2], b"PK");
 }
 
 /// Запись на стенд — только с APLAUT_E2E_WRITES=1.
