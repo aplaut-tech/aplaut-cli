@@ -148,7 +148,9 @@ async fn execute(runner: &Runner, kind: Kind, plan: Plan) -> Result<Reply, CliEr
         Some(file) if ok => add_output_file(&line, &file.path),
         _ => line,
     };
-    let data = (kind != Kind::Write && file.is_none() && !stdout.is_empty()).then_some(stdout);
+    // Данные во втором блоке — только у выгрузок: у записи и экспорта конверт сам несёт итог.
+    let data = (matches!(kind, Kind::Scroll | Kind::Get) && file.is_none() && !stdout.is_empty())
+        .then_some(stdout);
     Ok(Reply {
         envelope,
         data,
@@ -207,13 +209,22 @@ fn open(path: &Path, mode: FileMode) -> Result<File, CliError> {
     };
     options.open(path).map_err(|err| {
         if err.kind() == io::ErrorKind::AlreadyExists {
-            CliError::usage("output_exists", format!("файл {} уже есть", path.display()))
-                .with_field("output_file")
-                .with_hint("укажите другой output_file или overwrite: true; продолжить выгрузку в него — со state")
+            // Только scroll знает state — у экспорта такого продолжения нет (§5).
+            output_exists(path).with_hint(
+                "укажите другой output_file или overwrite: true; продолжить выгрузку в него — со state",
+            )
         } else {
             CliError::io(&format!("открытие {}", path.display()), &err)
         }
     })
+}
+
+/// Файл уже есть, а `overwrite` не задан (§5): общая ошибка для `scroll` (`open`) и `exports_*`
+/// (`export_flags`), у которых подсказка разная — у экспорта нет `state`, продолжать в файл нечем.
+fn output_exists(path: &Path) -> CliError {
+    CliError::usage("output_exists", format!("файл {} уже есть", path.display()))
+        .with_field("output_file")
+        .with_hint("укажите другой output_file или overwrite: true")
 }
 
 /// Конверт — последняя строка stderr, если это конверт; у записи успех идёт в stdout (§4).
@@ -228,7 +239,7 @@ pub fn split_envelope<'a>(
         let line = lines.pop().expect("последняя строка есть").to_string();
         return Some((line, ok, lines));
     }
-    if kind == Kind::Write {
+    if kind == Kind::Write || kind == Kind::Export {
         let line = stdout.lines().rev().find(|l| !l.trim().is_empty())?;
         let ok = envelope_ok(line)?;
         return Some((line.to_string(), ok, lines));
@@ -285,13 +296,10 @@ pub fn plan(
             Some(write_flags(tool, args, &mut argv)?),
             Destination::Inline,
         ),
-        // Временно, до Task 4 плана фазы 2: argv и output_file экспорта.
-        Kind::Export => {
-            return Err(CliError::usage(
-                "usage",
-                format!("{}: инструмент ещё не подключён", tool.name),
-            ))
-        }
+        Kind::Export => (
+            export_flags(tool, args, cwd, &mut argv)?,
+            Destination::Inline,
+        ),
     };
     argv.push("--json".into());
     argv.push("--no-input".into());
@@ -475,6 +483,62 @@ fn write_flags(
         argv.push("--upsert".into());
     }
     Ok(Value::Object(data).to_string())
+}
+
+/// `exports_*` (спека writes-and-exports §6): атрибуты create — JSON-ом в stdin, флаги — одним токеном;
+/// `output_file` — `--output` дочернего процесса по политике сервера (без `overwrite` файла быть не должно).
+fn export_flags(
+    tool: &ToolDef,
+    args: &Map<String, Value>,
+    cwd: &Path,
+    argv: &mut Vec<OsString>,
+) -> Result<Option<String>, CliError> {
+    let stdin = if tool.attributes.is_empty() {
+        None
+    } else {
+        let data: Map<String, Value> = args
+            .iter()
+            .filter(|(key, _)| tool.attributes.contains(&key.as_str()))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        push_flag(argv, "data", "-");
+        Some(Value::Object(data).to_string())
+    };
+    if let Some(filter) = string(args, "filter")? {
+        push_flag(argv, "filter", &filter);
+    }
+    if let Some(survey) = string(args, "survey_id")? {
+        push_flag(argv, "survey-id", &survey);
+    }
+    if boolean(args, "wait")? {
+        argv.push("--wait".into());
+    }
+    if let Some(timeout) = count(args, "wait_timeout")? {
+        if timeout == 0 {
+            return Err(
+                CliError::usage("usage", "wait_timeout должно быть больше 0")
+                    .with_field("wait_timeout"),
+            );
+        }
+        push_flag(argv, "wait-timeout", &timeout.to_string());
+    }
+    if boolean(args, "dry_run")? {
+        argv.push("--dry-run".into());
+    }
+    if let Destination::File { path, mode } = destination(
+        string(args, "output_file")?,
+        false,
+        boolean(args, "overwrite")?,
+        cwd,
+    )? {
+        if mode == FileMode::CreateNew && path.exists() {
+            return Err(output_exists(&path));
+        }
+        let mut flag = OsString::from("--output=");
+        flag.push(&path);
+        argv.push(flag);
+    }
+    Ok(stdin)
 }
 
 fn push_flag(argv: &mut Vec<OsString>, flag: &str, value: &str) {
@@ -838,6 +902,103 @@ mod tests {
             added["result"],
             json!({"emitted": 1, "output_file": "/work/out.jsonl"})
         );
+    }
+
+    #[test]
+    fn export_create_sends_attributes_to_stdin_and_flags_as_single_tokens() {
+        let plan = planned(
+            "exports_create",
+            json!({"records_type": "reviews", "format": "csv", "export_format": "[.id]",
+                   "filter": "rating:gte:4", "wait": true, "wait_timeout": 60, "output_file": "r.csv"}),
+        )
+        .unwrap();
+        assert_eq!(
+            argv(&plan),
+            [
+                "exports",
+                "create",
+                "--data=-",
+                "--filter=rating:gte:4",
+                "--wait",
+                "--wait-timeout=60",
+                "--output=/work/r.csv",
+                "--json",
+                "--no-input"
+            ]
+        );
+        let data: Value = serde_json::from_str(plan.stdin.as_deref().unwrap()).unwrap();
+        assert_eq!(
+            data,
+            json!({"records_type": "reviews", "format": "csv", "export_format": "[.id]"})
+        );
+        assert_eq!(plan.destination, Destination::Inline);
+    }
+
+    #[test]
+    fn export_get_puts_the_id_last_and_has_no_stdin() {
+        let plan = planned("exports_get", json!({"id": "e1", "wait": true})).unwrap();
+        assert_eq!(
+            argv(&plan),
+            [
+                "exports",
+                "get",
+                "--wait",
+                "--json",
+                "--no-input",
+                "--",
+                "e1"
+            ]
+        );
+        assert!(plan.stdin.is_none());
+    }
+
+    #[test]
+    fn export_output_file_follows_the_server_policy() {
+        let dir = std::env::temp_dir().join(format!("aplaut-invoke-export-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("taken.jsonl"), "old").unwrap();
+        let taken = plan(
+            &tool("exports_get"),
+            &args(json!({"id": "e1", "output_file": "taken.jsonl"})),
+            &[],
+            &dir,
+        );
+        assert_eq!(
+            error(taken),
+            ("output_exists".to_string(), Some("output_file".to_string()))
+        );
+        let overwrite = plan(
+            &tool("exports_get"),
+            &args(json!({"id": "e1", "output_file": "taken.jsonl", "overwrite": true})),
+            &[],
+            &dir,
+        )
+        .unwrap();
+        assert!(argv(&overwrite)
+            .iter()
+            .any(|a| a == &format!("--output={}", dir.join("taken.jsonl").display())));
+        assert_eq!(
+            error(planned(
+                "exports_get",
+                json!({"id": "e1", "overwrite": true})
+            )),
+            ("usage".to_string(), Some("overwrite".to_string()))
+        );
+        assert_eq!(
+            error(planned(
+                "exports_get",
+                json!({"id": "e1", "wait_timeout": 0})
+            )),
+            ("usage".to_string(), Some("wait_timeout".to_string()))
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn export_envelope_is_read_from_stdout_and_there_is_no_data_block() {
+        let env = r#"{"ok":true,"command":"exports.create","cli_version":"0","dry_run":false,"result":{},"warnings":[]}"#;
+        let (line, ok, _) = split_envelope(Kind::Export, &format!("{env}\n"), "").unwrap();
+        assert_eq!((line.as_str(), ok), (env, true));
     }
 
     #[test]

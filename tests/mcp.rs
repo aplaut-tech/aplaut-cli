@@ -11,6 +11,12 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use support::{aplaut, first_page_json, page_json, review, MockServer, Reply, TempDir};
 
+fn gzip_bytes(text: &str) -> Vec<u8> {
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(text.as_bytes()).unwrap();
+    encoder.finish().unwrap()
+}
+
 const TOKEN: (&str, &str) = ("APLAUT_ACCESS_TOKEN", "tok");
 
 /// MCP-клиент для тестов: `aplaut mcp` с чистым окружением, рабочий каталог — `home`.
@@ -749,5 +755,62 @@ fn state_keeps_its_page_size_when_limit_or_destination_change() {
     assert_eq!(envelope(&rest)["result"]["completed"], true);
     let lines = std::fs::read_to_string(home.path().join("rest.jsonl")).unwrap();
     assert_eq!(lines.lines().count(), 2, "{lines}");
+    assert_eq!(client.finish(), 0);
+}
+
+/// Экспорт через MCP: задача готова сразу, архив скачивается дочерним aplaut в output_file.
+#[test]
+fn export_create_downloads_into_output_file() {
+    let home = TempDir::new("mcp-export");
+    let server = MockServer::start_with(|origin| {
+        vec![
+            Reply::json(
+                201,
+                json!({"data": {"id": "e1", "type": "export_tasks", "attributes": {
+                    "records_type": "reviews", "format": "jsonl", "state": "completed",
+                    "archive_url": format!("{origin}/export_data/a.jsonl.gz"),
+                    "archive_content_type": "application/gzip", "finished_at": "x"}}})
+                .to_string(),
+            ),
+            Reply::Http {
+                status: 200,
+                headers: vec![],
+                body: gzip_bytes("{\"id\":\"r1\"}\n"),
+            },
+        ]
+    });
+    let mut client = served(home.path(), &server, &["--allow-writes"]);
+    let response = client.call(
+        "exports_create",
+        json!({"records_type": "reviews", "output_file": "reviews.jsonl"}),
+    );
+    assert!(!is_error(&response), "{response}");
+    let env = envelope(&response);
+    assert_eq!(env["command"], "exports.create");
+    let path = env["result"]["output_path"].as_str().unwrap().to_string();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"id\":\"r1\"}\n");
+    assert!(
+        response["result"]["content"].as_array().unwrap().len() == 1,
+        "данных во втором блоке нет"
+    );
+    assert_eq!(client.finish(), 0);
+}
+
+#[test]
+fn export_get_refuses_to_overwrite_without_permission() {
+    let home = TempDir::new("mcp-export-exists");
+    let server = MockServer::start(vec![]);
+    let mut client = served(home.path(), &server, &[]);
+    // Рабочий каталог сервера в этих тестах — home (Client::start, current_dir).
+    let taken = home.path().join("taken.jsonl");
+    std::fs::write(&taken, "old").unwrap();
+    let response = client.call(
+        "exports_get",
+        json!({"id": "e1", "output_file": "taken.jsonl"}),
+    );
+    assert!(is_error(&response), "{response}");
+    assert_eq!(envelope(&response)["error"]["code"], "output_exists");
+    assert!(server.requests().is_empty());
+    assert_eq!(std::fs::read_to_string(&taken).unwrap(), "old");
     assert_eq!(client.finish(), 0);
 }
