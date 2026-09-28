@@ -496,6 +496,12 @@ fn export_round_trip() {
     assert_eq!(created["result"]["state"], "completed");
     let id = created["result"]["id"].as_str().unwrap().to_string();
     let text = std::fs::read_to_string(&first).unwrap();
+    // Review Focus (M7): пустой архив — самый частый симптом неверного фильтра (ничего не нашлось), а
+    // `lines().all(…)` на пустой строке молча истинно — без явной проверки такая регрессия прошла бы.
+    assert!(
+        !text.is_empty(),
+        "архив пуст: фильтр не нашёл ни одной записи?"
+    );
     assert!(text
         .lines()
         .all(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["id"].is_string()));
