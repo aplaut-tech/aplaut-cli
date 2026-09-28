@@ -43,9 +43,19 @@ const GET_NOTE: &str = "Запись — во втором блоке ответ
 const WRITE_NOTE: &str = "Атрибуты — параметрами; обязательность и значения проверяет aplaut до \
 отправки (missing_attribute, invalid_attribute с подсказкой). dry_run: true — проверить и показать \
 запрос, ничего не отправляя.";
-const EXPORT_NOTE: &str = "Итог — в конверте (id, state, archive_url, output_path…), данных во втором блоке \
-нет. Долгий wait может упереться в таймаут MCP-клиента — тогда создайте задачу без wait и опрашивайте \
-exports_get. archive_url открывается без токена: не показывайте его посторонним.";
+/// Ruling I4 финальной ревизии (2026-09-28): отдельные заметки для create и get — прерванный create с
+/// wait теряет id задачи (сервер уже создал задачу — минутное окно потрачено), а get безопасно
+/// повторить в любой момент.
+const EXPORT_CREATE_NOTE: &str = "Итог — в конверте (id, state, archive_url, output_path…), данных во \
+втором блоке нет. Без wait и output_file ответ приходит сразу с id задачи. Чтобы дождаться и скачать, \
+вызовите exports_get с wait/output_file — это безопасно повторять и не создаёт новую задачу (сервер \
+создаёт одну задачу в минуту на токен). Если вызвать exports_create с wait и клиент оборвёт вызов по \
+таймауту, id задачи теряется, а повторный exports_create потратит минутное окно на новую задачу. \
+archive_url открывается без токена: не показывайте его посторонним.";
+const EXPORT_GET_NOTE: &str = "Итог — в конверте (id, state, archive_url, output_path…), данных во \
+втором блоке нет. Повторять безопасно в любой момент. Долгий wait может упереться в таймаут MCP-клиента \
+— тогда вызовите без wait и опрашивайте state сами. archive_url открывается без токена: не показывайте \
+его посторонним.";
 const EXPORT_OUTPUT_FILE_HELP: &str = "Скачать готовый файл сюда (путь от рабочего каталога сервера; \
 включает wait): gzip распаковывается, xlsx — как есть. Существующий файл не перезаписывается (см. overwrite)";
 const SEARCH_OPTIONS_HELP: &str =
@@ -201,7 +211,12 @@ fn tool(
         }
         Kind::Export => {
             let (properties, attributes) = export_properties(resource, verb, leaf);
-            (properties, attributes, EXPORT_NOTE)
+            let note = if verb == Verb::ExportCreate {
+                EXPORT_CREATE_NOTE
+            } else {
+                EXPORT_GET_NOTE
+            };
+            (properties, attributes, note)
         }
     };
     let positional = leaf
@@ -714,6 +729,29 @@ mod tests {
         );
         assert!(enabled(false).iter().any(|t| t.name == "exports_get"));
         assert!(!enabled(false).iter().any(|t| t.name == "exports_create"));
+    }
+
+    /// Ruling I4 финальной ревизии: заметки create и get разные — create предупреждает про потерю id
+    /// при обрыве wait, get говорит, что повторять его безопасно всегда; archive_url — в обеих.
+    #[test]
+    fn export_create_and_get_have_different_notes_about_wait() {
+        let catalog = catalog();
+        let create = find(&catalog, "exports_create");
+        let get = find(&catalog, "exports_get");
+        assert_ne!(create.description, get.description);
+        assert!(
+            create.description.contains("минутное окно"),
+            "{}",
+            create.description
+        );
+        assert!(get.description.contains("безопасно"), "{}", get.description);
+        for tool in [&create, &get] {
+            assert!(
+                tool.description.contains("archive_url"),
+                "{}",
+                tool.description
+            );
+        }
     }
 
     #[test]
