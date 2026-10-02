@@ -6,7 +6,7 @@
 ## Установка
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/aplaut-tech/aplaut-cli/releases/latest/download/aplaut-cli-installer.sh | sh
+curl -LsSf https://aplaut.com/install.sh | sh
 ```
 
 Работает на Linux (x86-64, ARM64) и macOS. Установщик кладёт `aplaut` в `~/.local/bin`; если
@@ -16,10 +16,10 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/aplaut-tech/aplaut-cli/
 
 ### Конкретная версия
 
-Тот же скрипт из нужного релиза:
+`aplaut.com/install.sh` всегда ставит последний релиз. Нужная версия — скриптом из её релиза на GitHub:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/aplaut-tech/aplaut-cli/releases/download/v0.6.0/aplaut-cli-installer.sh | sh
+curl -LsSf https://github.com/aplaut-tech/aplaut-cli/releases/download/v0.6.0/aplaut-cli-installer.sh | sh
 ```
 
 ### Серверы, контейнеры и CI
@@ -28,9 +28,9 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/aplaut-tech/aplaut-cli/
 
 ```bash
 # только бинарь в указанный каталог, без ~/.profile и служебных файлов
-curl … | APLAUT_CLI_UNMANAGED_INSTALL=/opt/aplaut/bin sh
+curl -LsSf https://aplaut.com/install.sh | APLAUT_CLI_UNMANAGED_INSTALL=/opt/aplaut/bin sh
 # обычная установка, но PATH не трогать
-curl … | APLAUT_CLI_NO_MODIFY_PATH=1 sh
+curl -LsSf https://aplaut.com/install.sh | APLAUT_CLI_NO_MODIFY_PATH=1 sh
 ```
 
 ## Обновление

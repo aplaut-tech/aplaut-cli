@@ -27,9 +27,10 @@ APLAUT_E2E_WRITES=1 …                          # e2e плюс круги за�
 dist plan                                      # что соберёт релиз
 ```
 
-Релиз: версия в `Cargo.toml` (и `Cargo.lock`), ссылка на установщик в `README.md`, версия в
-`tests/cli.rs`, примеры `cli_version` в `docs/automation.md` → коммит `chore: release X.Y.Z` → push
-тега `vX.Y.Z`; cargo-dist собирает 4 таргета (`dist-workspace.toml`).
+Релиз: версия в `Cargo.toml` (и `Cargo.lock`), ссылка на установщик конкретной версии в `README.md`
+(`aplaut.com/install.sh` — редирект на последний релиз, не трогать), версия в `tests/cli.rs`, примеры
+`cli_version` в `docs/automation.md` → коммит `chore: release X.Y.Z` → push тега `vX.Y.Z`; cargo-dist
+собирает 4 таргета (`dist-workspace.toml`).
 
 ## Архитектура
 
